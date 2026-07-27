@@ -199,6 +199,52 @@ async def _del_later(msg, delay: int = 60) -> None:
         pass
 
 
+async def transcribe_voice(message: Message, bot: Bot) -> None:
+    """Слушает голосовое или кружок и присылает текст ответом.
+
+    Само сообщение не трогаем — просто добавляем расшифровку,
+    чтобы можно было прочитать, если некогда слушать.
+    """
+    try:
+        import core_stt as stt
+        if not stt.available():
+            return
+        if await db.get_setting(message.chat.id, "stt", "1") != "1":
+            return
+
+        obj = message.voice or message.video_note
+        if obj is None:
+            return
+        if (obj.duration or 0) > stt.MAX_SECONDS:
+            return
+        if (obj.file_size or 0) > stt.MAX_BYTES:
+            return
+
+        f = await bot.get_file(obj.file_id)
+        buf = await bot.download_file(f.file_path)
+        audio = buf.read()
+        name = "voice.ogg" if message.voice else "circle.mp4"
+
+        text = await stt.transcribe(audio, name)
+        if not text:
+            return
+
+        kind = "🎙 Голосовое" if message.voice else "⭕️ Кружок"
+        who = mention(message.from_user)
+        mm, ss = divmod(int(obj.duration or 0), 60)
+        dur = f"{mm}:{ss:02d}"
+        body = html.escape(text[:3500])
+        try:
+            await message.reply(
+                f"{kind} от {who} · {dur}\n\n💬 {body}",
+                disable_web_page_preview=True)
+        except Exception:
+            pass
+    except Exception as e:
+        import logging
+        logging.getLogger("irisbot").warning("расшифровка: %s", str(e)[:150])
+
+
 # ── Медиа от тех, кто без описания ──────────────────────────────────
 MEDIA_BLOCK = (F.voice | F.video_note | F.sticker | F.animation | F.photo
                | F.video | F.audio | F.document)
@@ -223,6 +269,11 @@ async def media_gate(message: Message, bot: Bot):
                 await message.delete()
             except Exception:
                 pass
+            return
+        # голосовое или кружок — расшифруем в текст
+        if message.voice or message.video_note:
+            import asyncio as _a
+            _a.create_task(transcribe_voice(message, bot))
         return
 
     from core_ranks import effective_rank
@@ -387,19 +438,20 @@ async def activity(message: Message, bot: Bot):
                     # повторная анкета: описание уже есть, второй раз не нужно
                     if not await db.cooldown_left(uid, "form_dup", 60):
                         await db.set_cooldown(uid, "form_dup")
-                        note = (f"⚠️ {mention(message.from_user)}, у вас уже есть "
-                                f"описание — заполнять второй раз не нужно.\n\n"
-                                f"Посмотреть своё: <code>описание</code>\n"
-                                f"Изменить: напишите админу.")
+                        note = (f"✅ {mention(message.from_user)}, вы уже "
+                                f"заполнили описание — второй раз не нужно.\n\n"
+                                f"Можете спокойно общаться в других темах.\n"
+                                f"Посмотреть своё: <code>описание</code>")
                     else:
                         note = ""
                 else:
                     # обычная болтовня в теме анкет
                     if not await db.cooldown_left(uid, "form_done_warn", 120):
                         await db.set_cooldown(uid, "form_done_warn")
-                        note = (f"🧹 {mention(message.from_user)}, эта тема только "
-                                f"для заполнения описаний.\n"
-                                f"Общаться можно в других темах.")
+                        note = (f"✅ {mention(message.from_user)}, ваше описание "
+                                f"уже готово — можете спокойно общаться "
+                                f"в других темах.\n\n"
+                                f"Эта тема только для заполнения описаний.")
                     else:
                         note = ""
 
@@ -409,9 +461,9 @@ async def activity(message: Message, bot: Bot):
                             message.chat.id, note,
                             message_thread_id=form_topic,
                             disable_web_page_preview=True)
-                        # подсказка сама исчезнет, чтобы не копилась
+                        # подсказка исчезнет через 5 минут
                         import asyncio as _a
-                        _a.create_task(_del_later(warn, 60))
+                        _a.create_task(_del_later(warn, 300))
                     except Exception:
                         pass
                 return

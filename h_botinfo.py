@@ -179,3 +179,35 @@ async def cmd_restore(message: Message, bot: Bot, **kw):
         "Полное восстановление из копии происходит автоматически при "
         "запуске бота, если база пустая.\n"
         "Проверить состояние: <code>хранилище</code>")
+
+
+# ---------------- РАСШИФРОВКА ГОЛОСОВЫХ ----------------
+@router.message(Cmd("расшифровка", "голосовые в текст", "стт", "stt",
+                    "распознавание речи", section=S, rank=4,
+                    usage="расшифровка", desc="🎙 Голосовые и кружки в текст"))
+async def cmd_stt(message: Message, bot: Bot, args: str = "", **kw):
+    from core_ranks import require
+    if not await require(message, bot, 4):
+        return
+    import core_stt as stt
+    a = (args or "").strip().lower()
+    cid = message.chat.id
+
+    if a in {"вкл", "on", "включить", "да"}:
+        await db.set_setting(cid, "stt", "1")
+        extra = ("" if stt.available() else
+                 "\n\n⚠️ <i>Ключ не задан — напишите </i><code>расшифровка</code>"
+                 "<i>, там инструкция.</i>")
+        return await message.reply(
+            f"🎙 Расшифровка голосовых: <b>включена</b>{extra}")
+
+    if a in {"выкл", "off", "выключить", "нет"}:
+        await db.set_setting(cid, "stt", "0")
+        return await message.reply(
+            "🎙 Расшифровка голосовых: <b>выключена</b> в этом чате.")
+
+    txt = stt.status()
+    if stt.available():
+        on = await db.get_setting(cid, "stt", "1") == "1"
+        txt += f"\n\nВ этом чате: <b>{'🟢 включена' if on else '🔴 выключена'}</b>"
+    await message.reply(txt, disable_web_page_preview=True)

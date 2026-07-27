@@ -14,6 +14,7 @@ from aiogram.types import (CallbackQuery, ChatPermissions, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message)
 
 import db
+import core_modlog as modlog
 from core_punish import KIND_EMOJI, KIND_NAMES, log_punish
 from core_ranks import rank_label
 from core_registry import MAX_RANK, Cmd
@@ -183,6 +184,8 @@ def panel_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚠️ Варн-лист", callback_data="ap:list:warn:0")],
         [InlineKeyboardButton(text="🤖 Автомодерация", callback_data="ap:auto:0")],
         [InlineKeyboardButton(text="📝 Описания участников", callback_data="ap:desc:0")],
+        [InlineKeyboardButton(text="📜 Журнал снятий",
+                              callback_data="ap:lifted:0")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="ap:stat")],
         [InlineKeyboardButton(text="🔄 Обновить", callback_data="ap:main"),
          InlineKeyboardButton(text="🏠 В меню", callback_data="nav:home")],
@@ -294,7 +297,33 @@ async def item_view(log_id: int) -> tuple[str, InlineKeyboardMarkup]:
         text += (f"\n💬 <b>Переписка:</b>\n<pre>"
                  f"{html.escape(r['context'][:700])}</pre>")
 
+    # уже снятые наказания помечаем
+    if r["reviewed"]:
+        text += "\n\n✅ <i>Разобрано</i>"
+
     rows = []
+
+    # ── листалка: соседние наказания, чтобы не выходить в список ──
+    prev_r = await db.fetchone(
+        "SELECT id FROM mod_log WHERE id < ? ORDER BY id DESC LIMIT 1", (log_id,))
+    next_r = await db.fetchone(
+        "SELECT id FROM mod_log WHERE id > ? ORDER BY id ASC LIMIT 1", (log_id,))
+    pos = await db.fetchone(
+        "SELECT COUNT(*) c FROM mod_log WHERE id <= ?", (log_id,))
+    total = await db.fetchone("SELECT COUNT(*) c FROM mod_log")
+
+    nav = []
+    if prev_r:
+        nav.append(InlineKeyboardButton(
+            text="◀️ Пред.", callback_data=f"ap:item:{prev_r['id']}"))
+    nav.append(InlineKeyboardButton(
+        text=f"{pos['c']}/{total['c']}", callback_data="ap:noop"))
+    if next_r:
+        nav.append(InlineKeyboardButton(
+            text="След. ▶️", callback_data=f"ap:item:{next_r['id']}"))
+    if len(nav) > 1:
+        rows.append(nav)
+
     # наказать выдавшего — только если это живой админ, а не бот
     if r["by_id"]:
         rows.append([InlineKeyboardButton(
@@ -304,8 +333,63 @@ async def item_view(log_id: int) -> tuple[str, InlineKeyboardMarkup]:
     if not r["reviewed"]:
         rows.append([InlineKeyboardButton(
             text="✅ Отметить проверенным", callback_data=f"ap:ok:{r['id']}")])
-    rows.append([InlineKeyboardButton(text="⬅️ К логам", callback_data="ap:log:0")])
+    rows.append([InlineKeyboardButton(text="📜 Журнал снятий",
+                                      callback_data="ap:lifted:0")])
+    rows.append([InlineKeyboardButton(text="⬅️ К логам", callback_data="ap:log:0"),
+                 InlineKeyboardButton(text="🏠 В меню", callback_data="nav:home")])
     return text[:3900], InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def lifted_page(page: int) -> tuple[str, InlineKeyboardMarkup]:
+    """Журнал снятых наказаний — история не теряется."""
+    total = await db.fetchone("SELECT COUNT(*) c FROM lift_log")
+    rows = await db.fetchall(
+        "SELECT * FROM lift_log ORDER BY id DESC LIMIT ? OFFSET ?",
+        (PAGE, page * PAGE))
+    if not rows:
+        return ("📜 <b>Журнал снятий</b>\n\nПока никто ничего не снимал.\n\n"
+                "<i>Сюда попадают все отменённые муты, баны и варны — "
+                "видно, за что было наказание и кто его снял.</i>",
+                InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="⬅️ В панель",
+                                         callback_data="ap:main"),
+                    InlineKeyboardButton(text="🏠 В меню",
+                                         callback_data="nav:home")]]))
+
+    out = [f"📜 <b>Журнал снятий</b> — всего {total['c']}\n"]
+    buttons = []
+    for r in rows:
+        icon = KIND_EMOJI.get(r["kind"], "•")
+        when = time.strftime("%d.%m %H:%M", time.localtime(r["ts"]))
+        out.append(
+            f"<code>#{r['log_id']}</code> {icon} "
+            f"<b>{KIND_NAMES.get(r['kind'], r['kind'])}</b> снят\n"
+            f"   👤 {html.escape(r['target_name'] or '')}\n"
+            f"   📝 было за: {html.escape((r['reason'] or '—')[:50])}\n"
+            f"   👮 выдал: {html.escape(r['by_name'] or '—')}\n"
+            f"   ↩️ снял: {html.escape(r['lifted_name'] or '—')} · {when}")
+        if r["log_id"]:
+            buttons.append([InlineKeyboardButton(
+                text=f"{icon} #{r['log_id']} · {(r['target_name'] or '')[:14]}",
+                callback_data=f"ap:item:{r['log_id']}")])
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀️",
+                                        callback_data=f"ap:lifted:{page-1}"))
+    nav.append(InlineKeyboardButton(
+        text=f"{page+1}/{max(1, (total['c'] + PAGE - 1) // PAGE)}",
+        callback_data="ap:noop"))
+    if (page + 1) * PAGE < total["c"]:
+        nav.append(InlineKeyboardButton(text="▶️",
+                                        callback_data=f"ap:lifted:{page+1}"))
+    if len(nav) > 1:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton(text="⬅️ В панель",
+                                         callback_data="ap:main"),
+                    InlineKeyboardButton(text="🏠 В меню",
+                                         callback_data="nav:home")])
+    return "\n".join(out)[:3900], InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def punish_kb(log_id: int) -> InlineKeyboardMarkup:
@@ -406,12 +490,23 @@ async def cb_panel(call: CallbackQuery, bot: Bot):
                 "UPDATE punishments SET active=0, lifted_by=?, lifted_ts=? WHERE id=?",
                 (uid, int(time.time()), r["punish_id"]))
         await db.execute("UPDATE mod_log SET reviewed=1 WHERE id=?", (log_id,))
+
+        # запись в журнал снятий — чтобы история не терялась
+        await db.execute(
+            "INSERT INTO lift_log (chat_id, log_id, punish_id, target_id, "
+            "target_name, kind, reason, by_id, by_name, lifted_by, "
+            "lifted_name, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (r["chat_id"], log_id, r["punish_id"], r["target_id"],
+             r["target_name"], r["kind"], r["reason"], r["by_id"],
+             r["by_name"], uid, call.from_user.first_name, int(time.time())))
+
         try:
-            await bot.send_message(
+            sent = await bot.send_message(
                 r["chat_id"],
                 f"↩️ Наказание <code>#{log_id}</code> для "
                 f"{mention_id(r['target_id'], r['target_name'])} отменено "
                 f"администрацией.")
+            modlog.schedule_autodelete(bot, sent, 600)   # исчезнет через 10 мин
         except Exception:
             pass
         text, kb = await item_view(log_id)
@@ -459,7 +554,6 @@ async def cb_panel(call: CallbackQuery, bot: Bot):
         pid = await log_punish(chat_id, target,
                                kind if kind != "demote" else "warn",
                                reason, secs, uid)
-        import core_modlog as modlog
         await modlog.write(chat_id, pid, target, tname, uid,
                            call.from_user.first_name or "админ",
                            kind if kind != "demote" else "warn",
@@ -638,19 +732,39 @@ async def cb_panel(call: CallbackQuery, bot: Bot):
             "UPDATE mod_log SET reviewed=1 WHERE punish_id=?", (pid,))
 
         u = await db.get_user(r["user_id"])
+
+        # запись в журнал снятий
+        lg = await db.fetchone(
+            "SELECT id, by_id, by_name FROM mod_log WHERE punish_id=? LIMIT 1",
+            (pid,))
+        await db.execute(
+            "INSERT INTO lift_log (chat_id, log_id, punish_id, target_id, "
+            "target_name, kind, reason, by_id, by_name, lifted_by, "
+            "lifted_name, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (r["chat_id"], lg["id"] if lg else 0, pid, r["user_id"],
+             u["first_name"], r["kind"], r["reason"],
+             lg["by_id"] if lg else r["by_id"],
+             lg["by_name"] if lg else "", uid, call.from_user.first_name,
+             int(time.time())))
+
         try:
-            await bot.send_message(
+            sent = await bot.send_message(
                 r["chat_id"],
                 f"↩️ <b>{word}</b>\n"
                 f"👤 {mention_id(r['user_id'], u['first_name'])}\n"
-                f"👮 Снял: {mention_id(uid, call.from_user.first_name)}\n"
-                f"<i>Наказание было выдано неправомерно.</i>")
+                f"👮 Снял: {mention_id(uid, call.from_user.first_name)}")
+            modlog.schedule_autodelete(bot, sent, 600)   # исчезнет через 10 мин
         except Exception:
             pass
 
         call.data = f"ap:list:{kind}:{page}"
         await cb_panel(call, bot)
         return
+
+    if act == "lifted":
+        text, kb = await lifted_page(int(parts[2]) if len(parts) > 2 else 0)
+        await call.message.edit_text(text, reply_markup=kb)
+        return await call.answer()
 
     if act == "stat":
         rows = await db.fetchall(

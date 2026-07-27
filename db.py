@@ -155,6 +155,16 @@ CREATE TABLE IF NOT EXISTS mod_log (
     ts INTEGER);
 CREATE INDEX IF NOT EXISTS idx_modlog_chat ON mod_log(chat_id, ts);
 
+CREATE TABLE IF NOT EXISTS lift_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL, log_id INTEGER, punish_id INTEGER,
+    target_id INTEGER, target_name TEXT,
+    kind TEXT, reason TEXT,            -- за что было наказание
+    by_id INTEGER, by_name TEXT,       -- кто выдал
+    lifted_by INTEGER, lifted_name TEXT,   -- кто снял
+    ts INTEGER);
+CREATE INDEX IF NOT EXISTS idx_liftlog ON lift_log(chat_id, ts);
+
 CREATE TABLE IF NOT EXISTS msg_buffer (
     chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL,
     user_id INTEGER, user_name TEXT, text TEXT, ts INTEGER,
