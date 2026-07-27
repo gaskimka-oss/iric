@@ -107,7 +107,9 @@ async def desc_page(page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
                 "В чате: <code>тема описания</code>",
                 InlineKeyboardMarkup(inline_keyboard=[[
                     InlineKeyboardButton(text="⬅️ В панель",
-                                         callback_data="ap:main")]]))
+                                         callback_data="ap:main"),
+                    InlineKeyboardButton(text="🏠 В меню",
+                                         callback_data="nav:home")]]))
 
     rows = await db.fetchall(
         "SELECT s.user_id, u.first_name, u.username FROM chat_stats s "
@@ -164,7 +166,9 @@ async def desc_page(page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
     kb_rows.append([InlineKeyboardButton(text="🔄 Обновить",
                                          callback_data=f"ap:desc:{page}")])
     kb_rows.append([InlineKeyboardButton(text="⬅️ В панель",
-                                         callback_data="ap:main")])
+                                         callback_data="ap:main"),
+                    InlineKeyboardButton(text="🏠 В меню",
+                                         callback_data="nav:home")])
     return "\n".join(lines)[:3800], InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
 
@@ -178,7 +182,8 @@ def panel_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🤖 Автомодерация", callback_data="ap:auto:0")],
         [InlineKeyboardButton(text="📝 Описания участников", callback_data="ap:desc:0")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="ap:stat")],
-        [InlineKeyboardButton(text="🔄 Обновить", callback_data="ap:main")],
+        [InlineKeyboardButton(text="🔄 Обновить", callback_data="ap:main"),
+         InlineKeyboardButton(text="🏠 В меню", callback_data="nav:home")],
     ])
 
 
@@ -217,7 +222,9 @@ async def log_page(page: int) -> tuple[str, InlineKeyboardMarkup]:
     if not rows:
         return ("📋 <b>Логи модерации</b>\n\nЗаписей нет.",
                 InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="⬅️ Назад", callback_data="ap:main")]]))
+                    InlineKeyboardButton(text="⬅️ Назад", callback_data="ap:main"),
+                    InlineKeyboardButton(text="🏠 В меню",
+                                         callback_data="nav:home")]]))
 
     out = [f"📋 <b>Логи модерации</b> — всего {total['c']}\n"]
     buttons = []
@@ -226,12 +233,21 @@ async def log_page(page: int) -> tuple[str, InlineKeyboardMarkup]:
         when = time.strftime("%d.%m %H:%M", time.localtime(r["ts"]))
         src = "🤖" if r["source"] == "автомодерация" else "👮"
         flag = " ✅" if r["reviewed"] else ""
+        # отметка ИИ, если он проверял это наказание
+        ai_mark = ""
+        try:
+            import core_ai as _ai
+            v = r["ai_verdict"] if "ai_verdict" in r.keys() else None
+            if v and v != "ok":
+                ai_mark = f"\n   🧠 {_ai.VERDICT_ICON.get(v,'')} {_ai.VERDICT_TEXT.get(v,v)}"
+        except Exception:
+            pass
         out.append(
             f"<code>#{r['id']}</code> {icon} <b>{KIND_NAMES.get(r['kind'], r['kind'])}</b>{flag}\n"
             f"   👤 {html.escape(r['target_name'] or '')}\n"
             f"   {src} {html.escape(r['by_name'] or '')}\n"
             f"   📝 {html.escape((r['reason'] or '—')[:60])}\n"
-            f"   🕒 {when}")
+            f"   🕒 {when}{ai_mark}")
         buttons.append([InlineKeyboardButton(
             text=f"{icon} #{r['id']} · {r['target_name'][:14]}",
             callback_data=f"ap:item:{r['id']}")])
@@ -245,7 +261,8 @@ async def log_page(page: int) -> tuple[str, InlineKeyboardMarkup]:
     if (page + 1) * PAGE < total["c"]:
         nav.append(InlineKeyboardButton(text="▶️", callback_data=f"ap:log:{page+1}"))
     buttons.append(nav)
-    buttons.append([InlineKeyboardButton(text="⬅️ В панель", callback_data="ap:main")])
+    buttons.append([InlineKeyboardButton(text="⬅️ В панель", callback_data="ap:main"),
+                              InlineKeyboardButton(text="🏠 В меню", callback_data="nav:home")])
     return "\n".join(out)[:3800], InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -444,7 +461,7 @@ async def cb_panel(call: CallbackQuery, bot: Bot):
         await modlog.write(chat_id, pid, target, tname, uid,
                            call.from_user.first_name or "админ",
                            kind if kind != "demote" else "warn",
-                           reason, secs, "разбор", r["context"] or "")
+                           reason, secs, "разбор", r["context"] or "", bot=bot)
         await db.execute("UPDATE mod_log SET reviewed=1 WHERE id=?", (log_id,))
 
         try:
@@ -517,7 +534,8 @@ async def cb_panel(call: CallbackQuery, bot: Bot):
                 text="▶️", callback_data=f"ap:list:{kind}:{page+1}"))
         kb = InlineKeyboardMarkup(inline_keyboard=[
             *quick, nav,
-            [InlineKeyboardButton(text="⬅️ В панель", callback_data="ap:main")]])
+            [InlineKeyboardButton(text="⬅️ В панель", callback_data="ap:main"),
+                              InlineKeyboardButton(text="🏠 В меню", callback_data="nav:home")]])
         await call.message.edit_text(text, reply_markup=kb)
         return await call.answer()
 
@@ -541,7 +559,9 @@ async def cb_panel(call: CallbackQuery, bot: Bot):
                     callback_data=f"ap:item:{r['id']}")])
             text = "\n".join(out)[:3800]
         kb_rows.append([InlineKeyboardButton(text="⬅️ В панель",
-                                             callback_data="ap:main")])
+                                             callback_data="ap:main"),
+                        InlineKeyboardButton(text="🏠 В меню",
+                                             callback_data="nav:home")])
         await call.message.edit_text(
             text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
         return await call.answer()
@@ -646,7 +666,8 @@ async def cb_panel(call: CallbackQuery, bot: Bot):
         await call.message.edit_text(
             "\n".join(out)[:3800],
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="⬅️ В панель", callback_data="ap:main")]]))
+                InlineKeyboardButton(text="⬅️ В панель", callback_data="ap:main"),
+                InlineKeyboardButton(text="🏠 В меню", callback_data="nav:home")]]))
         return await call.answer()
 
     await call.answer()

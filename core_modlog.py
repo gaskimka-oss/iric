@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import html
 import time
 
@@ -55,7 +56,8 @@ async def build_context(chat_id: int, target_id: int,
 
 async def write(chat_id: int, punish_id: int, target_id: int, target_name: str,
                 by_id: int, by_name: str, kind: str, reason: str,
-                seconds: int, source: str, context: str = "") -> int:
+                seconds: int, source: str, context: str = "",
+                bot: Bot | None = None) -> int:
     await db.execute(
         "INSERT INTO mod_log (chat_id,punish_id,target_id,target_name,by_id,by_name,"
         "kind,reason,seconds,context,source,ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -63,7 +65,59 @@ async def write(chat_id: int, punish_id: int, target_id: int, target_name: str,
          by_name or ("автомодерация" if not by_id else str(by_id)),
          kind, reason, seconds, context, source, int(time.time())))
     row = await db.fetchone("SELECT last_insert_rowid() id")
-    return row["id"] if row else 0
+    log_id = row["id"] if row else 0
+
+    # ИИ проверяет справедливость наказания в фоне
+    try:
+        import core_ai as ai
+        if ai.available() and log_id:
+            asyncio.create_task(_ai_review(
+                log_id, chat_id, kind, reason, seconds,
+                target_name or str(target_id),
+                by_name or "автомодерация", context, bot))
+    except Exception:
+        pass
+    return log_id
+
+
+async def _ai_review(log_id: int, chat_id: int, kind: str, reason: str,
+                     seconds: int, target: str, moderator: str,
+                     context: str, bot: Bot | None) -> None:
+    """Фоновая проверка наказания. Спорные — показываем владельцу."""
+    import core_ai as ai
+    try:
+        r = await ai.review_punishment(kind, reason, seconds, target,
+                                       moderator, context)
+        if not r:
+            return
+        await db.execute(
+            "UPDATE mod_log SET ai_verdict=?, ai_score=?, ai_reason=?, "
+            "ai_advice=? WHERE id=?",
+            (r["verdict"], r["score"], r["reason"], r.get("advice", ""),
+             log_id))
+
+        # молча пропускаем справедливые и неуверенные оценки
+        if r["verdict"] == "ok" or r["score"] < 6 or bot is None:
+            return
+        if await db.get_setting(chat_id, "ai_alerts", "1") != "1":
+            return
+
+        from core_resolve import human_period
+        kinds = {"mute": "🔇 Мут", "ban": "🔨 Бан",
+                 "warn": "⚠️ Варн", "kick": "👢 Кик"}
+        term = human_period(seconds) if seconds else "бессрочно"
+        text = ai.render_review(r, kinds.get(kind, kind), target,
+                                moderator, term)
+        text += f"\n\n<code>#{log_id}</code> · разбор: <code>админ</code>"
+
+        import config
+        try:
+            await bot.send_message(config.OWNER_ID, text,
+                                   disable_web_page_preview=True)
+        except Exception:
+            pass
+    except Exception as e:
+        logging.getLogger("irisbot.ai").warning("разбор наказания: %s", e)
 
 
 async def autodelete(bot: Bot, chat_id: int, message_id: int,

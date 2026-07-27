@@ -1,4 +1,4 @@
-"""Автомодерация: мут за оскорбления. Словарь + ИИ."""
+"""Автомодерация: мут за оскорбления и мат. Словарь + ИИ-надзор."""
 from __future__ import annotations
 
 import html
@@ -75,8 +75,18 @@ async def handle(message: Message, bot: Bot) -> bool:
     strict = await db.get_setting(message.chat.id, "automod_strict", "0") == "1"
     addressed = bool(message.reply_to_message and message.reply_to_message.from_user
                      and message.reply_to_message.from_user.id != uid_self(message))
+    ai_ctx = ""
+    if use_ai:
+        try:
+            import core_ai as _ai
+            if _ai.available():
+                ai_ctx = await modlog.build_context(message.chat.id,
+                                                    message.from_user.id, text)
+        except Exception:
+            pass
     level, reason, source = await toxicity.check(
-        text, use_ai=use_ai, addressed=addressed, punish_soft_mat=strict)
+        text, use_ai=use_ai, addressed=addressed, punish_soft_mat=strict,
+        context=ai_ctx)
     if level < 2:
         return False
 
@@ -126,7 +136,7 @@ async def handle(message: Message, bot: Bot) -> bool:
                        message.from_user.first_name or str(uid),
                        0, "автомодерация",
                        "mute" if secs else "warn", reason, secs,
-                       "автомодерация", ctx)
+                       "автомодерация", ctx, bot=bot)
 
     icon = "🔇" if secs else "⚠️"
     action = f"мут на <b>{human_period(secs)}</b>" if secs else "<b>предупреждение</b>"
@@ -157,13 +167,17 @@ async def cmd_automod(message: Message, bot: Bot, args: str = "", **kw):
     if a in {"вкл", "on", "да", "включить"}:
         await db.set_setting(cid, "automod", "1")
         t2 = await get_mute_time(cid, 2)
-        ai = "включён" if toxicity.ai_available() else "не подключён"
+        import core_ai as ai
+        brain = (f"🧠 ИИ-надзор: <b>включён</b> ({ai.provider()})"
+                 if ai.available() else
+                 "🧠 ИИ-надзор: <b>выключен</b> — работает словарь\n"
+                 "<i>Включить: добавьте AI_API_KEY на хостинге</i>")
         return await message.reply(
             f"🤖 <b>Автомодерация включена</b>\n\n"
             f"За оскорбления и мат — мут на <b>{human_period(t2)}</b>\n"
             f"Сообщение нарушителя удаляется\n"
             f"Модерация (ранг 1+) не проверяется\n\n"
-            f"🧠 ИИ-анализ: <b>{ai}</b>\n\n"
+            f"{brain}\n\n"
             f"<i>Настройки: </i><code>автомут время 2 часа</code> · "
             f"<code>автомут тест текст</code>")
 
@@ -200,37 +214,43 @@ async def cmd_automod(message: Message, bot: Bot, args: str = "", **kw):
             f"Источник: {src}\n"
             f"Действие: <b>{act}</b>")
 
+    if a.startswith("ии"):
+        import core_ai as ai
+        val = "0" if "выкл" in a else "1"
+        await db.set_setting(cid, "automod_ai", val)
+        state = "включён" if val == "1" else "выключен"
+        extra = ("" if ai.available() else
+                 "\n\n⚠️ <i>Ключ ИИ не задан — пока работает только словарь. "
+                 "Как включить: команда </i><code>ии</code>")
+        return await message.reply(f"🧠 ИИ-надзор: <b>{state}</b>{extra}")
+
     if a.startswith("удаление"):
         val = "0" if "выкл" in a else "1"
         await db.set_setting(cid, "automod_delete", val)
         return await message.reply(
             f"🗑 Удаление сообщений: <b>{'включено' if val == '1' else 'выключено'}</b>")
 
-    if a.startswith("ии"):
-        val = "0" if "выкл" in a else "1"
-        await db.set_setting(cid, "automod_ai", val)
-        state = "включён" if val == "1" else "выключен"
-        extra = ("" if toxicity.ai_available() else
-                 "\n\n⚠️ <i>Ключ ИИ не задан в .env — работает только словарь.</i>")
-        return await message.reply(f"🧠 ИИ-анализ: <b>{state}</b>{extra}")
-
     on = await is_enabled(cid)
     t2 = await get_mute_time(cid, 2)
     dele = await _delete_flag(cid)
+    import core_ai as ai
     ai_on = await db.get_setting(cid, "automod_ai", "1") == "1"
+    ai_txt = (f"🟢 {ai.provider()}" if ai.available() and ai_on
+              else "🔴 выключен" if not ai_on
+              else "⚪️ ключ не задан")
     await message.reply(
         f"🤖 <b>Автомодерация</b>\n\n"
         f"Состояние: <b>{'🟢 включена' if on else '🔴 выключена'}</b>\n"
         f"Срок мута: <b>{human_period(t2)}</b>\n"
         f"Удалять сообщение: <b>{'да' if dele else 'нет'}</b>\n"
-        f"ИИ-анализ: <b>{'да' if ai_on else 'нет'}</b>"
-        f"{'' if toxicity.ai_available() else ' <i>(ключ не задан)</i>'}\n\n"
+        f"ИИ-надзор: <b>{ai_txt}</b>\n\n"
         f"<code>автомут вкл</code> — включить\n"
         f"<code>автомут выкл</code> — выключить\n"
         f"<code>автомут время 2 часа</code> — срок мута\n"
         f"<code>автомут тест текст</code> — проверить фразу\n"
         f"<code>автомут удаление выкл</code> — не удалять\n"
-        f"<code>автомут ии выкл</code> — только словарь")
+        f"<code>автомут ии выкл</code> — только словарь\n"
+        f"<code>ии</code> — настройки ИИ-надзора")
 
 
 @router.message(Cmd("нарушения", "лог автомута", section=S, rank=1,
@@ -278,3 +298,105 @@ async def cmd_strict(message: Message, bot: Bot, args: str = "", **kw):
         f"Строгий режим: <b>{'включён' if cur == '1' else 'выключен'}</b>\n\n"
         f"<i>Выключен — «бля» и «пиздец» без адресата пропускаются.</i>\n"
         f"Изменить: <code>автомут строгий вкл</code>")
+
+
+# ═══════════════ ИИ-НАДЗОР ═══════════════
+@router.message(Cmd("ии", "ai", "нейросеть", "ии надзор", section=S, rank=6,
+                    usage="ии", desc="🧠 ИИ-надзор: статус и настройка"))
+async def cmd_ai(message: Message, bot: Bot, args: str = "", **kw):
+    """Статус ИИ, включение оповещений, сводка по чату."""
+    if not await require(message, bot, 6):
+        return
+    import core_ai as ai
+    cid = message.chat.id
+    a = (args or "").strip().lower()
+
+    # ии оповещения вкл|выкл
+    if a.startswith(("оповещ", "уведом", "алерт")):
+        val = "0" if "выкл" in a else "1"
+        await db.set_setting(cid, "ai_alerts", val)
+        return await message.reply(
+            f"🔔 Оповещения о спорных наказаниях: "
+            f"<b>{'включены' if val == '1' else 'выключены'}</b>")
+
+    # ии сводка — что происходит в чате
+    if a.startswith(("сводка", "отчет", "отчёт", "анализ")):
+        if not ai.available():
+            return await message.reply("⚠️ Ключ ИИ не задан.")
+        m = await message.reply("🧠 Читаю переписку…")
+        ctx = await modlog.build_context(cid, 0)
+        res = await ai.chat_summary(ctx)
+        if not res:
+            return await m.edit_text("😕 ИИ не ответил. Попробуйте позже.")
+        mood = str(res.get("mood", "—"))
+        out = [f"{ai.MOOD_ICON.get(mood, '💬')} <b>Обстановка: {mood}</b>\n",
+               html.escape(str(res.get("summary", ""))[:600])]
+        if res.get("problems"):
+            out.append(f"\n⚠️ <b>Проблемы:</b>\n{html.escape(str(res['problems'])[:400])}")
+        if res.get("advice"):
+            out.append(f"\n💡 <b>Совет:</b>\n{html.escape(str(res['advice'])[:400])}")
+        return await m.edit_text("\n".join(out))
+
+    # ии проверь <текст> — разовая проверка
+    if a.startswith(("проверь", "тест")):
+        probe = (args or "")[len(a.split()[0]):].strip()
+        if not probe:
+            return await message.reply("Формат: <code>ии проверь ты дебил</code>")
+        if not ai.available():
+            return await message.reply("⚠️ Ключ ИИ не задан.")
+        m = await message.reply("🧠 Думаю…")
+        ctx = await modlog.build_context(cid, 0)
+        res = await ai.watch_message(probe, ctx)
+        if not res:
+            return await m.edit_text("😕 ИИ не ответил.")
+        names = {0: "✅ норма", 1: "🟡 грубость",
+                 2: "🟠 оскорбление", 3: "🔴 мат/травля"}
+        extra = (f"\n👤 Зачинщик: {html.escape(res['instigator'])}"
+                 if res.get("instigator") else "")
+        return await m.edit_text(
+            f"🧠 <b>Оценка ИИ</b>\n\n«{html.escape(probe[:150])}»\n\n"
+            f"Вердикт: <b>{names[res['level']]}</b>\n"
+            f"💬 {html.escape(res['reason'])}{extra}")
+
+    # статус
+    alerts = await db.get_setting(cid, "ai_alerts", "1") == "1"
+    watch = await db.get_setting(cid, "automod_ai", "1") == "1"
+    stat = await db.fetchone(
+        "SELECT COUNT(*) c FROM mod_log WHERE chat_id=? AND ai_verdict IS NOT NULL",
+        (cid,))
+    bad = await db.fetchone(
+        "SELECT COUNT(*) c FROM mod_log WHERE chat_id=? AND ai_verdict "
+        "IN ('harsh','wrong') AND ai_score>=6", (cid,))
+
+    if not ai.available():
+        return await message.reply(
+            "🧠 <b>ИИ-надзор</b>\n\n"
+            "Состояние: <b>🔴 ключ не задан</b>\n\n"
+            "<b>Что даёт ИИ:</b>\n"
+            "• проверяет каждое наказание — справедливо ли\n"
+            "• пишет вам, если модератор перегнул\n"
+            "• понимает контекст: отличает дружеский подкол\n"
+            "  от настоящего оскорбления\n"
+            "• делает сводку обстановки в чате\n\n"
+            "<b>Как включить:</b>\n"
+            "1. Возьмите ключ API (OpenAI, DeepSeek, OpenRouter)\n"
+            "2. На хостинге добавьте переменную:\n"
+            "   <code>AI_API_KEY</code> = ваш ключ\n"
+            "3. Если сервис не OpenAI, добавьте ещё:\n"
+            "   <code>AI_API_URL</code> и <code>AI_MODEL</code>\n"
+            "4. Перезапустите бота\n\n"
+            "<i>DeepSeek дешевле всего — около 1₽ за 1000 проверок.</i>")
+
+    await message.reply(
+        f"🧠 <b>ИИ-надзор</b>\n\n"
+        f"Состояние: <b>🟢 работает</b>\n"
+        f"Сервис: <b>{ai.provider()}</b>\n"
+        f"Модель: <code>{html.escape(ai.MODEL)}</code>\n\n"
+        f"👁 Следит за чатом: <b>{'да' if watch else 'нет'}</b>\n"
+        f"🔔 Пишет о спорных наказаниях: <b>{'да' if alerts else 'нет'}</b>\n\n"
+        f"📊 Проверено наказаний: <b>{stat['c']}</b>\n"
+        f"⚠️ Спорных: <b>{bad['c']}</b>\n\n"
+        f"<code>ии сводка</code> — что происходит в чате\n"
+        f"<code>ии проверь текст</code> — оценить фразу\n"
+        f"<code>ии оповещения выкл</code> — не писать в ЛС\n"
+        f"<code>автомут ии выкл</code> — только словарь")

@@ -704,7 +704,8 @@ async def cmd_give_admin(message: Message, bot: Bot, args: str = "", **kw):
 
 
 # ═══════════════ ПРИВЯЗКА ТЕМЫ ═══════════════
-@router.message(Cmd("тема граммов", "тема грамм", "грамм тема", section=S, rank=4,
+@router.message(Cmd("тема граммов", "тема граммы", "тема грамм", "тема казино",
+                    "тема игр", "тема игры", "грамм тема", section=S, rank=4,
                     usage="тема граммов [ссылка]",
                     desc="Тема, где работают команды граммов"))
 async def cmd_gram_topic(message: Message, bot: Bot, args: str = "", **kw):

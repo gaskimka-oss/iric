@@ -53,7 +53,8 @@ def _kb_main() -> InlineKeyboardMarkup:
             rows.append(buf); buf = []
     if buf:
         rows.append(buf)
-    return InlineKeyboardMarkup(inline_keyboard=rows[:14])
+    from core_nav import with_home
+    return with_home(InlineKeyboardMarkup(inline_keyboard=rows[:14]))
 
 
 async def _section_view(chat_id: int, num: int) -> tuple[str, InlineKeyboardMarkup]:
@@ -68,8 +69,10 @@ async def _section_view(chat_id: int, num: int) -> tuple[str, InlineKeyboardMark
                      f"{stars(need) or 'все'} {RANK_NAMES.get(need,'')}".rstrip())
         rows.append([InlineKeyboardButton(
             text=f"{mark}{c.names[0][:22]} · {need}", callback_data=f"dk:c:{num}:{c.key[:40]}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Разделы", callback_data="dk:m")])
-    return "\n".join(lines)[:3800], InlineKeyboardMarkup(inline_keyboard=rows)
+    from core_nav import with_home
+    return ("\n".join(lines)[:3800],
+            with_home(InlineKeyboardMarkup(inline_keyboard=rows),
+                      back="dk:m", back_text="⬅️ Разделы"))
 
 
 @router.message(Cmd("дк", "доступ команд", "доступ", "настройка команд", section=S,

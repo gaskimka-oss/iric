@@ -378,11 +378,14 @@ def ai_check(text: str, timeout: int = 8) -> tuple[int, str] | None:
 
 
 async def check(text: str, use_ai: bool = True, addressed: bool = False,
-                punish_soft_mat: bool = False) -> tuple[int, str, str]:
+                punish_soft_mat: bool = False,
+                context: str = "") -> tuple[int, str, str]:
     """-> (уровень, причина, источник).
 
     addressed — сообщение адресовано человеку (реплай/@ник/«ты…»).
     punish_soft_mat — наказывать мат-междометия без адресата.
+    context — переписка вокруг сообщения: с ней ИИ отличает
+              дружеский подкол от настоящего оскорбления.
     """
     lvl, reason = local_check(text)
 
@@ -393,13 +396,29 @@ async def check(text: str, use_ai: bool = True, addressed: bool = False,
         if not (addressed or _is_addressed(text)):
             return 0, "", "словарь"
 
-    if lvl >= 2:
-        return lvl, reason, "словарь"
-
-    if use_ai and AI_KEY and len(text.strip()) >= 8:
-        import asyncio
-        res = await asyncio.to_thread(ai_check, text)
-        if res and res[0] > lvl:
-            return res[0], res[1] or "нарушение", "ИИ"
+    # ИИ смотрит на переписку и может как повысить оценку,
+    # так и ОТМЕНИТЬ ложное срабатывание словаря
+    if use_ai and len(text.strip()) >= 8:
+        try:
+            import core_ai as _ai
+            if _ai.available():
+                r = await _ai.watch_message(text, context)
+                if r:
+                    if r["level"] > lvl:
+                        return r["level"], r["reason"] or "нарушение", "ИИ"
+                    if r["level"] < lvl:
+                        # ИИ увидел контекст: дружеский подкол, цитата, шутка
+                        return (r["level"],
+                                r["reason"] or "по контексту не нарушение",
+                                "ИИ")
+                    return lvl, reason, "словарь+ИИ"
+        except Exception:
+            pass
+        # запасной путь — старый прямой запрос
+        if AI_KEY and lvl < 2:
+            import asyncio
+            res = await asyncio.to_thread(ai_check, text)
+            if res and res[0] > lvl:
+                return res[0], res[1] or "нарушение", "ИИ"
 
     return lvl, reason, "словарь"

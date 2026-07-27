@@ -22,7 +22,6 @@ SETTINGS: dict[int, dict[str, str]] = {
         "form_topic": "148507",     # тема, где новички пишут описание
         "form_required": "1",       # описание обязательно
         "gram_topic": "132681",     # тема для граммов и игр
-        "topic": "описание",
     },
 }
 
@@ -60,6 +59,24 @@ async def mark_filled_profiles() -> int:
     return n
 
 
+async def fix_topic_note() -> None:
+    """Убирает старую общечатовую подпись вида «граммы»/«описание».
+
+    Из-за неё команда «тема» показывала одно и то же во всех темах:
+    в теме описаний могло писать «граммы». Настоящие привязки тем
+    хранятся в form_topic / gram_topic и не затрагиваются.
+    """
+    rows = await db.fetchall("SELECT chat_id, value FROM settings WHERE key='topic'")
+    for r in rows:
+        val = (r["value"] or "").strip().lower()
+        if val in {"граммы", "граммов", "грамм", "описание", "описания",
+                   "казино", "игры", "анкета", "анкеты"}:
+            await db.execute("DELETE FROM settings WHERE chat_id=? AND key='topic'",
+                             (r["chat_id"],))
+            log.info("Убрана устаревшая подпись темы «%s» в чате %s",
+                     val, r["chat_id"])
+
+
 async def apply() -> None:
     now = int(time.time())
     added_s = added_st = 0
@@ -68,6 +85,11 @@ async def apply() -> None:
         await mark_filled_profiles()
     except Exception as e:
         log.warning("отметка анкет: %s", e)
+
+    try:
+        await fix_topic_note()
+    except Exception as e:
+        log.warning("чистка подписи темы: %s", e)
 
     for chat_id, kv in SETTINGS.items():
         for key, val in kv.items():

@@ -148,6 +148,10 @@ CREATE TABLE IF NOT EXISTS mod_log (
     context TEXT,              -- переписка вокруг нарушения
     source TEXT,               -- 'админ' | 'автомодерация'
     reviewed INTEGER NOT NULL DEFAULT 0,
+    ai_verdict TEXT,           -- ok | soft | harsh | wrong
+    ai_score INTEGER DEFAULT 0,
+    ai_reason TEXT,
+    ai_advice TEXT,
     ts INTEGER);
 CREATE INDEX IF NOT EXISTS idx_modlog_chat ON mod_log(chat_id, ts);
 
@@ -264,6 +268,8 @@ async def _migrate() -> None:
         "staff": [("pos", "INTEGER NOT NULL DEFAULT 0"),
                   ("left_chat", "INTEGER NOT NULL DEFAULT 0")],
         "cmd_personal": [("mode", "TEXT NOT NULL DEFAULT 'allow'")],
+        "mod_log": [("ai_verdict", "TEXT"), ("ai_score", "INTEGER DEFAULT 0"),
+                    ("ai_reason", "TEXT"), ("ai_advice", "TEXT")],
         "users": [("verified", "INTEGER NOT NULL DEFAULT 0"),
                   ("grams", "INTEGER NOT NULL DEFAULT 0")],
         "profiles": [("real_name", "TEXT"), ("country", "TEXT"), ("tz", "TEXT"),

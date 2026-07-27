@@ -338,16 +338,61 @@ async def net_add(message: Message, bot: Bot, **kw):
 
 
 # ================= 10. ТЕМЫ МОДЕРАТОРОВ =================
-@router.message(Cmd("тема", "темы", section=S_TOPIC, rank=1, usage="тема {текст}",
-                    desc="Тема для модераторов"))
+@router.message(Cmd("тема", "темы", section=S_TOPIC, rank=1, usage="тема",
+                    desc="Что настроено в этой теме"))
 async def topic(message: Message, bot: Bot, args: str = "", **kw):
+    """Показывает назначение ИМЕННО той темы, где написана команда.
+
+    Раньше здесь была общая заметка на весь чат, из-за чего в теме
+    описаний могло показываться «граммы». Теперь бот смотрит,
+    что реально привязано к текущей теме.
+    """
     if not await require(message, bot, 1):
         return
+
+    here = int(getattr(message, "message_thread_id", None) or 0)
+
+    from h_userinfo import get_form_topic, topic_link
+    from h_grams import get_gram_topic
+    form_t = await get_form_topic(message.chat.id)
+    gram_t = await get_gram_topic(message.chat.id)
+
     if args:
-        await db.set_setting(message.chat.id, "topic", args)
-        return await message.reply(f"🧵 Тема установлена: <b>{html.escape(args)}</b>")
-    t = await db.get_setting(message.chat.id, "topic")
-    await message.reply(f"🧵 Текущая тема: {html.escape(t) if t else 'не задана'}")
+        # старое поведение: подписать текущую тему вручную
+        key = f"topic_note:{here}" if here else "topic"
+        await db.set_setting(message.chat.id, key, args)
+        return await message.reply(
+            f"🧵 Подпись для этой темы: <b>{html.escape(args)}</b>")
+
+    if here and here == form_t:
+        return await message.reply(
+            "📝 <b>Эта тема: описания</b>\n\n"
+            "Здесь новички заполняют анкету.\n"
+            "Всё, кроме анкет, удаляется.\n\n"
+            "Заполнить: <code>+описание</code> или <code>шаблон</code>")
+
+    if here and here == gram_t:
+        return await message.reply(
+            "💊 <b>Эта тема: граммы и игры</b>\n\n"
+            "Здесь работают команды граммов.\n"
+            "Баланс: <code>б</code> · Игры: <code>игры</code>\n"
+            "Бонус: <code>бонус граммы</code>")
+
+    # прочие темы — показываем подпись и общую карту настроек
+    note = await db.get_setting(message.chat.id, f"topic_note:{here}", "")
+    if not note and not here:
+        note = await db.get_setting(message.chat.id, "topic", "")
+
+    lines = ["🧵 <b>Эта тема: обычное общение</b>"]
+    if note:
+        lines.append(f"Подпись: <b>{html.escape(note)}</b>")
+    lines.append("")
+    lines.append("<b>Настроенные темы чата:</b>")
+    lines.append(f"📝 Описания: "
+                 + (topic_link(message.chat.id, form_t) if form_t else "не задана"))
+    lines.append(f"💊 Граммы: "
+                 + (topic_link(message.chat.id, gram_t) if gram_t else "не задана"))
+    await message.reply("\n".join(lines), disable_web_page_preview=True)
 
 
 # ================= 11. ГОЛОСОВАНИЯ =================
@@ -488,9 +533,7 @@ async def tg_check(message: Message, bot: Bot, **kw):
         if not pin: tips.append("• Право «Закрепление сообщений» — для пина")
         if not invite: tips.append("• Право «Приглашение по ссылке»")
         if not manage: tips.append("• Право «Управление группой»")
-    if not priv:
-        tips.append("• Отключите Privacy Mode: @BotFather → Bot Settings → Group Privacy → Turn off\n"
-                    "  (после этого удалите бота из чата и добавьте заново)")
+    # про Privacy Mode не пишем: он уже настроен, подсказка только мешает
     r = await effective_rank(message, bot)
     await message.reply(
         f"🩺 <b>Диагностика</b>\n\n"
@@ -499,7 +542,6 @@ async def tg_check(message: Message, bot: Bot, **kw):
         f"{mark(delete)} Может удалять сообщения\n"
         f"{mark(pin)} Может закреплять\n"
         f"{mark(invite)} Приглашение по ссылке\n"
-        f"{mark(manage)} Управление группой\n"
-        f"{mark(priv)} Видит все сообщения (Privacy off)\n\n"
+        f"{mark(manage)} Управление группой\n\n"
         f"Ваш ранг: <b>{rank_label(r) if r else 'Участник'}</b>"
         + (("\n\n<b>Что исправить:</b>\n" + "\n".join(tips)) if tips else "\n\n🎉 Всё настроено!"))

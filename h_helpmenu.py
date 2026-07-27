@@ -18,7 +18,7 @@ from utils import money
 router = Router(name="helpmenu")
 PER_PAGE = 12
 
-ASSETS = __import__("pathlib").Path(__file__).resolve().parent
+ASSETS = __import__("pathlib").Path(__file__).resolve().parent.parent / "assets"
 
 # какая картинка какому разделу соответствует
 SECTION_IMG = {
@@ -32,7 +32,7 @@ SECTION_IMG = {
 
 def _img(name: str):
     for ext in (".jpg", ".png"):
-        p = ASSETS / f"img_{name}{ext}"
+        p = ASSETS / f"{name}{ext}"
         if p.exists():
             return FSInputFile(p)
     return None
@@ -64,7 +64,8 @@ def _menu_kb(page: int = 0) -> InlineKeyboardMarkup:
     elif urls:
         rows.append([InlineKeyboardButton(text=f"🌐 Справка ч.{i+1}", url=u)
                      for i, u in enumerate(urls[:3])])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    from core_nav import with_home
+    return with_home(InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 def _menu_text() -> str:
@@ -226,10 +227,10 @@ async def cb_help(call: CallbackQuery):
         if url:
             rows.append([InlineKeyboardButton(
                 text="🔗 Открыть раздел в справке", url=url)])
-        rows.append([InlineKeyboardButton(text="⬅️ К разделам",
-                                          callback_data=f"h:p:{page}")])
+        from core_nav import with_home
         await _edit(call, pages[sub],
-                    InlineKeyboardMarkup(inline_keyboard=rows),
+                    with_home(InlineKeyboardMarkup(inline_keyboard=rows),
+                              back=f"h:p:{page}", back_text="⬅️ К разделам"),
                     SECTION_IMG.get(num, "banner_main"))
         return await call.answer()
     await call.answer()
@@ -248,13 +249,15 @@ async def cmd_find(message: Message, args: str = "", **kw):
     for c in found[:15]:
         out.append(f"• <code>{html.escape(c.usage)}</code> — {html.escape(c.desc)}\n"
                    f"   <i>{SECTIONS.get(c.section,'')}</i>")
+    from core_nav import with_home
     kb = None
     if found:
         url = docs.section_url(found[0].section)
         if url:
             kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="🔗 Открыть в справке", url=url)]])
-    await message.reply(_safe_cut("\n".join(out), 3800), reply_markup=kb,
+    await message.reply(_safe_cut("\n".join(out), 3800),
+                        reply_markup=with_home(kb),
                         disable_web_page_preview=True)
 
 

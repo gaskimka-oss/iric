@@ -69,7 +69,7 @@ async def cmd_mute(message: Message, bot: Bot, args: str = "", **kw):
     ctx = await modlog.build_context(message.chat.id, uid)
     await modlog.write(message.chat.id, pid, uid, name,
                        message.from_user.id, message.from_user.first_name,
-                       "mute", reason, secs, "админ", ctx)
+                       "mute", reason, secs, "админ", ctx, bot=bot)
     sent = await message.reply(
         f"🔇 <b>Мут выдан</b>\n"
         f"👤 {mention_id(uid, name)}\n"
@@ -137,7 +137,7 @@ async def cmd_ban(message: Message, bot: Bot, args: str = "", **kw):
     ctx = await modlog.build_context(message.chat.id, uid)
     await modlog.write(message.chat.id, pid, uid, name,
                        message.from_user.id, message.from_user.first_name,
-                       "ban", reason, secs, "админ", ctx)
+                       "ban", reason, secs, "админ", ctx, bot=bot)
     sent = await message.reply(
         f"🔨 <b>Бан выдан</b>\n"
         f"👤 {mention_id(uid, name)}\n"
@@ -192,7 +192,7 @@ async def cmd_kick(message: Message, bot: Bot, args: str = "", **kw):
     ctx = await modlog.build_context(message.chat.id, uid)
     await modlog.write(message.chat.id, pid, uid, name,
                        message.from_user.id, message.from_user.first_name,
-                       "kick", rest, 0, "админ", ctx)
+                       "kick", rest, 0, "админ", ctx, bot=bot)
     sent = await message.reply(f"👢 <b>Исключён</b>\n👤 {mention_id(uid, name)}\n"
                                f"📝 Причина: {html.escape(rest)}\n<code>#{pid}</code>")
     modlog.schedule_autodelete(bot, sent)
@@ -236,7 +236,7 @@ async def cmd_warn(message: Message, bot: Bot, args: str = "", **kw):
     ctx = await modlog.build_context(message.chat.id, uid)
     await modlog.write(message.chat.id, pid, uid, name,
                        message.from_user.id, message.from_user.first_name,
-                       "warn", rest, 0, "админ", ctx)
+                       "warn", rest, 0, "админ", ctx, bot=bot)
     sent = await message.reply(text)
     modlog.schedule_autodelete(bot, sent)
 

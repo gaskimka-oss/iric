@@ -221,25 +221,8 @@ async def cmd_remove_rank(message: Message, bot: Bot, args: str = "", **kw):
 async def cmd_staff(message: Message, bot: Bot, **kw):
     groups = await _staff_rows(message.chat.id)
     text = _render_staff(groups, "Состав модерации")
-
-    # ТГ-администраторы, которых бот не может ограничивать
-    try:
-        admins = await bot.get_chat_administrators(message.chat.id)
-        me = await bot.me()
-        tg = []
-        for m in admins:
-            if not m.user or m.user.is_bot or m.user.id == me.id:
-                continue
-            mark = "👑" if m.status == "creator" else "🛡"
-            tg.append(f"{mark} {_link(m.user.username, m.user.first_name, m.user.id)}")
-        if tg:
-            text += ("\n\n<b>🛡 Администраторы Telegram</b>\n"
-                     + "\n".join(tg)
-                     + "\n<i>Их бот не может мутить и банить —"
-                       " таково ограничение Telegram.</i>")
-    except Exception:
-        pass
-
+    # Список ТГ-администраторов намеренно не показываем:
+    # состав ведётся рангами бота, дубли только путают.
     await message.reply(text, disable_web_page_preview=True)
 
 

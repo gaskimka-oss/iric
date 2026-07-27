@@ -17,6 +17,7 @@ import db
 import core_backup as backup
 import core_docs as docs
 import core_health as health
+import core_nav as nav
 import core_seed as seed
 import core_keyboard as kbd
 from core_access import access_middleware
@@ -195,6 +196,7 @@ async def main() -> None:
               userinfo.router):
         r.message.middleware(access_middleware)
 
+    dp.include_router(nav.router)
     dp.include_router(adminpanel.router)
     dp.include_router(start.router)
     dp.include_router(helpmenu.router)

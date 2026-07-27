@@ -72,7 +72,8 @@ def _kb_schedule(kind: str) -> InlineKeyboardMarkup:
                                       callback_data=f"sch:{kind}:off")])
     rows.append([InlineKeyboardButton(text="📋 Показать расписание",
                                       callback_data="sch:show:-")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    from core_nav import with_home
+    return with_home(InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 async def _schedule_text(chat_id: int) -> str:
