@@ -21,9 +21,33 @@ import urllib.request
 log = logging.getLogger("irisbot.ai")
 
 KEY = (os.getenv("AI_API_KEY") or "").strip()
-URL = (os.getenv("AI_API_URL")
-       or "https://api.openai.com/v1/chat/completions").strip()
-MODEL = (os.getenv("AI_MODEL") or "gpt-4o-mini").strip()
+
+
+def _guess() -> tuple[str, str]:
+    """Определяем сервис и модель по виду ключа.
+
+    Чтобы на хостинге хватило ОДНОЙ переменной AI_API_KEY —
+    остальное бот подставит сам. Заданные вручную AI_API_URL
+    и AI_MODEL всегда важнее догадки.
+    """
+    if KEY.startswith("sk-or-"):        # OpenRouter
+        return ("https://openrouter.ai/api/v1/chat/completions",
+                "google/gemma-4-31b-it:free")
+    if KEY.startswith("gsk_"):          # Groq
+        return ("https://api.groq.com/openai/v1/chat/completions",
+                "llama-3.3-70b-versatile")
+    if KEY.startswith("sk-proj-") or KEY.startswith("sk-svcacct-"):
+        return ("https://api.openai.com/v1/chat/completions", "gpt-4o-mini")
+    if KEY.startswith("sk-"):           # DeepSeek и OpenAI-совместимые
+        return ("https://api.deepseek.com/v1/chat/completions",
+                "deepseek-chat")
+    return ("https://api.openai.com/v1/chat/completions", "gpt-4o-mini")
+
+
+_URL_GUESS, _MODEL_GUESS = _guess()
+
+URL = (os.getenv("AI_API_URL") or _URL_GUESS).strip()
+MODEL = (os.getenv("AI_MODEL") or _MODEL_GUESS).strip()
 
 TIMEOUT = int(os.getenv("AI_TIMEOUT", "20") or 20)
 

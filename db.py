@@ -207,6 +207,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     user_id INTEGER PRIMARY KEY, about TEXT, city TEXT, age TEXT,
     birthday TEXT, hobby TEXT, contact TEXT,
     real_name TEXT, country TEXT, tz TEXT, family TEXT, nick2 TEXT,
+    custom TEXT,               -- описание, вписанное админом вручную
+    custom_by INTEGER, custom_ts INTEGER,
     filled INTEGER NOT NULL DEFAULT 0, filled_ts INTEGER);
 
 CREATE TABLE IF NOT EXISTS first_seen (
@@ -272,7 +274,9 @@ async def _migrate() -> None:
                     ("ai_reason", "TEXT"), ("ai_advice", "TEXT")],
         "users": [("verified", "INTEGER NOT NULL DEFAULT 0"),
                   ("grams", "INTEGER NOT NULL DEFAULT 0")],
-        "profiles": [("real_name", "TEXT"), ("country", "TEXT"), ("tz", "TEXT"),
+        "profiles": [("custom", "TEXT"), ("custom_by", "INTEGER"),
+                     ("custom_ts", "INTEGER"),
+                     ("real_name", "TEXT"), ("country", "TEXT"), ("tz", "TEXT"),
                      ("family", "TEXT"), ("nick2", "TEXT"),
                      ("filled", "INTEGER NOT NULL DEFAULT 0"), ("filled_ts", "INTEGER")],
     }

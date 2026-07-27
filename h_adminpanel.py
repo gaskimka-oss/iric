@@ -94,7 +94,8 @@ async def _no_desc_users(chat_id: int) -> list:
     for r in rows:
         p = await db.fetchone("SELECT * FROM profiles WHERE user_id=?",
                               (r["user_id"],))
-        if not p or (not p["filled"] and _filled_count(p) < 3):
+        has_custom = bool(p and "custom" in p.keys() and p["custom"])
+        if not p or (not has_custom and not p["filled"] and _filled_count(p) < 3):
             out.append(r)
     return out
 
@@ -121,7 +122,8 @@ async def desc_page(page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
         p = await db.fetchone("SELECT * FROM profiles WHERE user_id=?",
                               (r["user_id"],))
         cnt = _filled_count(p) if p else 0
-        if p and (p["filled"] or cnt >= 3):
+        has_custom = bool(p and "custom" in p.keys() and p["custom"])
+        if p and (has_custom or p["filled"] or cnt >= 3):
             done.append((r, cnt))
         else:
             missing.append((r, cnt))

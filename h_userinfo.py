@@ -12,7 +12,7 @@ from aiogram.types import ChatPermissions, Message
 import db
 from core_ranks import effective_rank, get_rank, rank_name
 from core_registry import Cmd, stars
-from core_resolve import resolve_target
+from core_resolve import real_reply, resolve_target
 from utils import mention_id
 
 router = Router(name="userinfo")
@@ -303,7 +303,15 @@ async def cmd_description(message: Message, bot: Bot, args: str = "", **kw):
     p = await _profile(uid)
     mine = (uid == me)
 
-    lines = [f"📋 <b>Описание</b> {mention_id(uid, html.escape(name or str(uid)))}", ""]
+    head = f"📋 <b>Описание</b> {mention_id(uid, html.escape(name or str(uid)))}"
+
+    # если админ вписал своё описание — показываем именно его
+    custom = p["custom"] if "custom" in p.keys() else None
+    if custom:
+        return await message.reply(f"{head}\n\n{html.escape(custom)}",
+                                   disable_web_page_preview=True)
+
+    lines = [head, ""]
     empty = True
     for key, label, col in FIELDS:
         val = p[col] if col in p.keys() else None
@@ -329,6 +337,88 @@ EXAMPLE = """☆ Имя: Дима
 ☆ семейное положение: свободен
 ☆ Айди: 51288077171
 ☆ Ник: ZRG Dima"""
+
+
+@router.message(Cmd("изменить описание", "редактировать описание",
+                    "поменять описание", "задать описание", "описание изменить",
+                    "правка описания", "изм описание",
+                    section=S, rank=4, usage="изменить описание @ник\n{текст}",
+                    desc="Вписать участнику своё описание (ранг 4+)"))
+async def cmd_edit_description(message: Message, bot: Bot, args: str = "", **kw):
+    """Админ вписывает человеку ЛЮБОЙ текст описания.
+
+    Формат:
+        изменить описание @ник
+        любой текст, сколько угодно строк
+
+    Или реплаем на сообщение человека:
+        изменить описание
+        любой текст
+    """
+    from core_ranks import require
+    if not await require(message, bot, 4):
+        return
+
+    raw = (args or "").strip()
+    if not raw and not real_reply(message):
+        return await message.reply(
+            "✏️ <b>Изменить описание участнику</b>\n\n"
+            "<b>Способ 1 — по нику:</b>\n"
+            "<code>изменить описание @ник\n"
+            "Тут любой текст, который увидят все.\n"
+            "Можно несколько строк.</code>\n\n"
+            "<b>Способ 2 — ответом на его сообщение:</b>\n"
+            "<code>изменить описание\n"
+            "Тут текст</code>\n\n"
+            "<b>Полезное:</b>\n"
+            "<code>изменить описание @ник сброс</code> — вернуть анкету\n"
+            "<code>описание @ник</code> — посмотреть\n\n"
+            "<i>Текст пишете вы, бот ничего не меняет.</i>",
+            disable_web_page_preview=True)
+
+    # первая строка — на кого, остальное — текст описания
+    parts = raw.split("\n", 1)
+    head = parts[0].strip()
+    body = parts[1].strip() if len(parts) > 1 else ""
+
+    uid, name, rest = await resolve_target(message, head, bot)
+    if not uid:
+        return await message.reply(
+            "🤔 Не понял, кому менять описание.\n"
+            "Укажите <code>@ник</code> или ответьте на сообщение человека.")
+
+    # текст мог остаться в первой строке после ника
+    text = (rest.strip() + ("\n" + body if body else "")).strip() or body
+
+    if text.lower() in {"сброс", "убрать", "очистить", "удалить", "-"}:
+        await _profile(uid)
+        await db.execute(
+            "UPDATE profiles SET custom=NULL, custom_by=NULL, custom_ts=NULL "
+            "WHERE user_id=?", (uid,))
+        return await message.reply(
+            f"🧹 Своё описание убрано у {mention_id(uid, html.escape(name or str(uid)))}.\n"
+            f"Снова показывается обычная анкета.")
+
+    if not text:
+        return await message.reply(
+            "📝 А что вписать? Текст пишется со <b>второй строки</b>:\n\n"
+            f"<code>изменить описание @{html.escape(name or 'ник')}\n"
+            f"Тут любой текст</code>")
+
+    text = text[:2000]
+    await _profile(uid)
+    await db.execute(
+        "UPDATE profiles SET custom=?, custom_by=?, custom_ts=?, "
+        "filled=1, filled_ts=COALESCE(filled_ts, ?) WHERE user_id=?",
+        (text, message.from_user.id, int(time.time()), int(time.time()), uid))
+
+    await message.reply(
+        f"✅ <b>Описание изменено</b>\n"
+        f"👤 {mention_id(uid, html.escape(name or str(uid)))}\n\n"
+        f"{html.escape(text[:600])}\n\n"
+        f"<i>Показывается вместо анкеты. Вернуть анкету:</i>\n"
+        f"<code>изменить описание @ник сброс</code>",
+        disable_web_page_preview=True)
 
 
 @router.message(Cmd("+описание", "+ описание", "добавить описание",
@@ -470,6 +560,9 @@ async def form_done(uid: int) -> bool:
     p = await db.fetchone("SELECT * FROM profiles WHERE user_id=?", (uid,))
     if not p:
         return False
+    # админ вписал описание вручную — считаем заполненным
+    if "custom" in p.keys() and p["custom"]:
+        return True
     if p["filled"]:
         return True
     return sum(1 for _, _, c in FIELDS if p[c]) >= MIN_FIELDS
