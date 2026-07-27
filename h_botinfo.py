@@ -106,3 +106,69 @@ async def cmd_uptime(message: Message, **kw):
     await message.reply(
         f"⏱ Бот работает без перезапуска: <b>{uptime_str()}</b>\n"
         f"🕒 Запущен: {time.strftime('%d.%m.%Y %H:%M', time.localtime(START_TS))}")
+
+
+# ---------------- ХРАНИЛИЩЕ И РЕЗЕРВНЫЕ КОПИИ ----------------
+@router.message(Cmd("хранилище", "база", "диск", "storage", section=S, rank=6,
+                    usage="хранилище",
+                    desc="Где лежит база и переживает ли она перезапуск"))
+async def cmd_storage(message: Message, bot: Bot, **kw):
+    from core_ranks import require
+    if not await require(message, bot, 6):
+        return
+    import core_storage as storage
+    import core_backup as backup
+
+    txt = storage.report()
+    chat = backup.backup_chat()
+    txt += (f"\n\n💾 <b>Копии в Telegram</b>\n"
+            f"Куда шлём: <code>{chat}</code>\n"
+            f"Как часто: раз в <b>{backup.INTERVAL_MIN} мин</b>\n"
+            f"Сделать сейчас: <code>бэкап</code>\n"
+            f"Восстановить: <code>восстановить базу</code>")
+    if not storage.INFO["persistent"]:
+        txt += ("\n\n⚠️ Хостинг очищает папку при перезапуске. "
+                "Данные держатся на копиях в Telegram — не удаляйте "
+                "закреплённое сообщение в личке с ботом.")
+    await message.reply(txt)
+
+
+@router.message(Cmd("бэкап", "бекап", "сделать бэкап", "backup", section=S, rank=6,
+                    usage="бэкап", desc="Сохранить копию базы в Telegram"))
+async def cmd_backup(message: Message, bot: Bot, **kw):
+    from core_ranks import require
+    if not await require(message, bot, 6):
+        return
+    import core_backup as backup
+    m = await message.reply("💾 Делаю копию базы…")
+    ok = await backup.save(bot, "📥 копия по команде")
+    try:
+        await m.edit_text(
+            "✅ Копия сохранена и закреплена в личке с ботом.\n"
+            "После перезапуска бот поднимет из неё все настройки."
+            if ok else
+            "❌ Не вышло сохранить копию.\n"
+            "Проверьте: бот должен уметь писать вам в личку — "
+            "напишите ему <code>/start</code>.")
+    except Exception:
+        pass
+
+
+@router.message(Cmd("восстановить базу", "восстановить настройки", "restore",
+                    section=S, rank=6, usage="восстановить базу",
+                    desc="Поднять базу из последней копии в Telegram"))
+async def cmd_restore(message: Message, bot: Bot, **kw):
+    from core_ranks import require
+    if not await require(message, bot, 6):
+        return
+    import core_seed as seed
+    try:
+        await seed.apply()
+    except Exception:
+        pass
+    await message.reply(
+        "♻️ Базовые настройки чата возвращены "
+        "(тема описаний, тема граммов, состав).\n\n"
+        "Полное восстановление из копии происходит автоматически при "
+        "запуске бота, если база пустая.\n"
+        "Проверить состояние: <code>хранилище</code>")

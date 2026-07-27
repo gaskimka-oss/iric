@@ -8,7 +8,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# база хранится в volume, чтобы переживать перезапуски
-VOLUME ["/app/data"]
+# Каталоги для базы. Если хостинг умеет монтировать постоянный диск —
+# он подхватит один из них. Если нет, бот всё равно не потеряет данные:
+# копия базы уходит в Telegram и поднимается оттуда при старте.
+RUN mkdir -p /data /app/data
+VOLUME ["/data", "/app/data"]
+
+ENV PYTHONUNBUFFERED=1
+
+# порт для healthcheck хостинга (бот отвечает 200 OK)
+EXPOSE 8080
 
 CMD ["python", "bot.py"]

@@ -14,7 +14,10 @@ from aiogram.types import BotCommand, Message
 
 import config
 import db
+import core_backup as backup
 import core_docs as docs
+import core_health as health
+import core_seed as seed
 from core_access import access_middleware
 import h_chatlock as chatlock
 import h_chatset as chatset
@@ -102,10 +105,27 @@ async def set_commands(bot: Bot) -> None:
 
 async def main() -> None:
     config.validate()
-    await db.init()
+
+    log.info("Хранилище: %s (запуск №%d, база на месте: %s)",
+             config.STORAGE_INFO["dir"], config.STORAGE_INFO["boots"],
+             "да" if config.STORAGE_INFO["db_existed"] else "нет")
 
     bot = Bot(token=config.BOT_TOKEN,
               default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
+    # если база пустая (хостинг стёр диск) — тянем последнюю копию из Telegram
+    try:
+        if await backup.restore_if_needed(bot):
+            log.info("✅ Настройки восстановлены из резервной копии")
+    except Exception as e:
+        log.warning("Восстановление пропущено: %s", e)
+
+    await db.init()
+    try:
+        await seed.apply()
+    except Exception as e:
+        log.warning("seed: %s", e)
+
     dp = Dispatcher()
     dp.message.middleware(user_middleware)
     dp.callback_query.middleware(user_middleware)
@@ -157,6 +177,8 @@ async def main() -> None:
     await set_commands(bot)
     asyncio.create_task(timers_worker(bot))
     asyncio.create_task(chatlock.schedule_worker(bot))
+    asyncio.create_task(backup.worker(bot))
+    await health.start()          # порт для healthcheck хостинга
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
@@ -168,6 +190,10 @@ async def main() -> None:
         log.info("Получен сигнал остановки — завершаюсь.")
     finally:
         log.info("Закрываю соединения…")
+        try:
+            await asyncio.wait_for(backup.save(bot, "🔻 копия перед остановкой"), 25)
+        except Exception as e:
+            log.warning("копия перед остановкой не сделана: %s", e)
         await db.close()
         await bot.session.close()
 
