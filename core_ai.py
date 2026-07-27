@@ -25,7 +25,26 @@ URL = (os.getenv("AI_API_URL")
        or "https://api.openai.com/v1/chat/completions").strip()
 MODEL = (os.getenv("AI_MODEL") or "gpt-4o-mini").strip()
 
-TIMEOUT = int(os.getenv("AI_TIMEOUT", "12") or 12)
+TIMEOUT = int(os.getenv("AI_TIMEOUT", "20") or 20)
+
+# Запасные модели: бесплатные тарифы часто перегружены (ошибка 429),
+# поэтому просим сервис перебрать несколько по очереди.
+# Работает у OpenRouter; другие сервисы поле просто игнорируют.
+FALLBACKS = [m.strip() for m in (os.getenv("AI_FALLBACKS") or
+    "google/gemma-4-26b-a4b-it:free,"
+    "openrouter/free").split(",") if m.strip()]
+
+MAX_MODELS = 3          # ограничение OpenRouter: не больше трёх в списке
+
+
+def _models() -> list[str]:
+    """Основная модель + запасные, без повторов."""
+    out = [MODEL]
+    if "openrouter" in URL.lower():
+        for m in FALLBACKS:
+            if m not in out and len(out) < MAX_MODELS:
+                out.append(m)
+    return out
 
 
 def available() -> bool:
@@ -48,13 +67,17 @@ def _ask(system: str, user: str, max_tokens: int = 220) -> dict | None:
     """Синхронный запрос. None — если ИИ недоступен или ответ битый."""
     if not KEY:
         return None
-    body = json.dumps({
+    payload = {
         "model": MODEL,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user[:3500]}],
         "temperature": 0,
         "max_tokens": max_tokens,
-    }).encode()
+    }
+    alts = _models()
+    if len(alts) > 1:
+        payload["models"] = alts        # сервис сам возьмёт доступную
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         URL, body,
         {"Content-Type": "application/json",
@@ -62,20 +85,41 @@ def _ask(system: str, user: str, max_tokens: int = 220) -> dict | None:
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             data = json.load(r)
-        content = data["choices"][0]["message"]["content"].strip()
+        if "error" in data and "choices" not in data:
+            log.warning("ИИ вернул ошибку: %s", str(data["error"])[:160])
+            return None
+        content = (data["choices"][0]["message"].get("content") or "").strip()
+        if not content:
+            log.warning("ИИ вернул пустой ответ (модель «думала» слишком долго)")
+            return None
         content = re.sub(r"^```(?:json)?|```$", "", content).strip()
+        # иногда модель добавляет текст вокруг JSON — вырезаем сам объект
+        if not content.startswith("{"):
+            m = re.search(r"\{.*\}", content, re.S)
+            if m:
+                content = m.group(0)
         return json.loads(content)
     except Exception as e:
-        log.warning("ИИ недоступен: %s", e)
+        log.warning("ИИ недоступен: %s", str(e)[:160])
         return None
 
 
 async def ask(system: str, user: str, max_tokens: int = 220) -> dict | None:
-    """Асинхронная обёртка — не блокирует бота."""
-    try:
-        return await asyncio.to_thread(_ask, system, user, max_tokens)
-    except Exception:
-        return None
+    """Асинхронная обёртка — не блокирует бота.
+
+    Бесплатные модели иногда возвращают пустой ответ или упираются
+    в лимит провайдера, поэтому делаем вторую попытку.
+    """
+    for attempt in (1, 2):
+        try:
+            res = await asyncio.to_thread(_ask, system, user, max_tokens)
+        except Exception:
+            res = None
+        if res is not None:
+            return res
+        if attempt == 1:
+            await asyncio.sleep(1.5)
+    return None
 
 
 # ══════════════════ 1. НАДЗОР ЗА НАКАЗАНИЯМИ ══════════════════
@@ -178,7 +222,7 @@ async def watch_message(text: str, context: str = "") -> dict | None:
         return None
     q = (f"Переписка:\n{context}\n\nПоследнее сообщение: {text[:600]}"
          if context else text[:600])
-    res = await ask(WATCH_PROMPT, q, max_tokens=120)
+    res = await ask(WATCH_PROMPT, q, max_tokens=200)
     if not isinstance(res, dict):
         return None
     try:

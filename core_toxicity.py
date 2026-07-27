@@ -397,8 +397,13 @@ async def check(text: str, use_ai: bool = True, addressed: bool = False,
             return 0, "", "словарь"
 
     # ИИ смотрит на переписку и может как повысить оценку,
-    # так и ОТМЕНИТЬ ложное срабатывание словаря
-    if use_ai and len(text.strip()) >= 8:
+    # так и ОТМЕНИТЬ ложное срабатывание словаря.
+    #
+    # Экономия запросов: дёргаем ИИ не на каждое сообщение, а только
+    # когда есть о чём думать — словарь что-то заметил, либо фраза
+    # адресная. Так бесплатных лимитов хватает надолго.
+    worth_asking = (lvl >= 1) or addressed or _is_addressed(text)
+    if use_ai and worth_asking and len(text.strip()) >= 8:
         try:
             import core_ai as _ai
             if _ai.available():
