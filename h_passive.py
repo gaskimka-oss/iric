@@ -165,15 +165,28 @@ async def on_new_members(message: Message, bot: Bot):
                                        topic_link)
         if await needs_form(message.chat.id, u.id):
             ft = await get_form_topic(message.chat.id)
-            where = (f"\n\n📌 Заполнять здесь:\n{topic_link(message.chat.id, ft)}"
-                     if ft else "")
-            hello = await message.answer(
-                f"📝 {mention(u)}, заполните описание, чтобы писать в чат.\n\n"
-                f"Скопируйте и отправьте, подставив свои данные:\n\n"
-                f"<code>{TEMPLATE}</code>{where}",
-                disable_web_page_preview=True)
-            import asyncio as _a
-            _a.create_task(_del_later(hello, 300))
+            # Шаблон шлём ТОЛЬКО в тему описаний. В общий чат — короткую
+            # ссылку, чтобы не засорять его простынёй из анкеты.
+            try:
+                if ft:
+                    hello = await message.bot.send_message(
+                        message.chat.id,
+                        f"📝 {mention(u)}, добро пожаловать!\n\n"
+                        f"Чтобы писать в чат, заполните описание:\n"
+                        f"<code>{TEMPLATE}</code>",
+                        message_thread_id=ft,
+                        disable_web_page_preview=True)
+                    import asyncio as _a
+                    _a.create_task(_del_later(hello, 600))
+                else:
+                    hello = await message.answer(
+                        f"📝 {mention(u)}, заполните описание, чтобы писать "
+                        f"в чат.\n\n<code>{TEMPLATE}</code>",
+                        disable_web_page_preview=True)
+                    import asyncio as _a
+                    _a.create_task(_del_later(hello, 300))
+            except Exception:
+                pass
 
 
 async def _del_later(msg, delay: int = 60) -> None:
@@ -266,7 +279,8 @@ async def activity(message: Message, bot: Bot):
 
     # --- присланная анкета: сохраняем в любом чате ----------------------
     from h_userinfo import (LINE_RE as _LR, parse_form as _pf,
-                                   _save_form as _sf, _split_lines as _sl)
+                                   _save_form as _sf, _split_lines as _sl,
+                                   looks_like_form as _lf)
     _lines = _sl(text_raw)
     if len(_lines) >= 2 and sum(1 for l in _lines if _LR.match(l.strip())) >= 2:
         if _pf(text_raw):
@@ -277,7 +291,8 @@ async def activity(message: Message, bot: Bot):
     if message.chat.type != "private":
         from h_userinfo import (LINE_RE, TEMPLATE, _save_form,
                                        _split_lines, get_form_topic,
-                                       needs_form, topic_id, topic_link)
+                                       looks_like_form, needs_form,
+                                       topic_id, topic_link)
         if await needs_form(message.chat.id, uid):
             from core_ranks import effective_rank
             _rank = await effective_rank(message, bot)
@@ -287,7 +302,8 @@ async def activity(message: Message, bot: Bot):
                 _ft = await get_form_topic(message.chat.id)
                 if _ft and topic_id(message) == _ft:
                     _lines = _split_lines(text_raw)
-                    if sum(1 for l in _lines if LINE_RE.match(l.strip())) >= 2:
+                    if (sum(1 for l in _lines if LINE_RE.match(l.strip())) >= 2
+                            or looks_like_form(text_raw)):
                         await _save_form(message, text_raw)
                         return
                     try:
@@ -316,7 +332,8 @@ async def activity(message: Message, bot: Bot):
                 # анкету принимаем только в назначенной теме
                 lines = _split_lines(text_raw)
                 hits = sum(1 for l in lines if LINE_RE.match(l.strip()))
-                if hits >= 2 and in_form_topic:
+                # в теме описаний принимаем и свободный рассказ о себе
+                if in_form_topic and (hits >= 2 or looks_like_form(text_raw)):
                     await _save_form(message, text_raw)
                     return
 

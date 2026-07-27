@@ -512,11 +512,53 @@ async def cmd_template(message: Message, bot: Bot, **kw):
         disable_web_page_preview=True)
     _autodel(sent, 300)
 
+def looks_like_form(text: str) -> bool:
+    """Похоже ли сообщение на описание о себе.
+
+    Люди пишут анкету двумя способами:
+      1) по шаблону, с двоеточиями — «☆ Имя: Дима»
+      2) свободно, просто списком строк о себе:
+         «🥰 Ксения / 🥰18 годиков / 🥰 Ставропольский край»
+    Второй вариант тоже надо принимать, иначе человек не сможет
+    заполнить описание вообще.
+    """
+    lines = _split_lines(text)
+    if sum(1 for l in lines if LINE_RE.match(l.strip())) >= MIN_FIELDS:
+        return True
+    # свободная форма: несколько строк и достаточно текста
+    meaningful = [l for l in lines if len(l.strip()) >= 2]
+    return len(meaningful) >= 3 and len(text.strip()) >= 25
+
+
 async def _save_form(message: Message, text: str) -> None:
     data = parse_form(text)
+    uid = message.from_user.id
+
+    # Свободное описание: полей по шаблону мало, но человек явно рассказал
+    # о себе. Сохраняем текст целиком — как есть, со всеми смайликами.
+    if len(data) < MIN_FIELDS and looks_like_form(text):
+        await _profile(uid)
+        clean = text.strip()[:2000]
+        await db.execute(
+            "UPDATE profiles SET custom=?, custom_ts=?, filled=1, "
+            "filled_ts=COALESCE(filled_ts, ?) WHERE user_id=?",
+            (clean, int(time.time()), int(time.time()), uid))
+        # заодно сохраняем то, что всё же распозналось
+        if data:
+            sets = ", ".join(f"{c}=?" for c in data)
+            await db.execute(f"UPDATE profiles SET {sets} WHERE user_id=?",
+                             (*data.values(), uid))
+        return await message.reply(
+            "✅ <b>Описание принято!</b>\n\n"
+            "Теперь можете писать в любой теме и в любом чате — "
+            "заполнять второй раз не нужно.\n\n"
+            "Посмотреть: <code>описание</code>")
+
     if not data:
         return await message.reply(
-            "Не удалось распознать анкету.\nШаблон: <code>шаблон</code>")
+            "📝 Не понял, где тут описание.\n\n"
+            "Расскажите о себе — хотя бы 3 строки, "
+            "или возьмите форму командой <code>шаблон</code>.")
     uid = message.from_user.id
     await _profile(uid)
     sets = ", ".join(f"{c}=?" for c in data)
