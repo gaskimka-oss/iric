@@ -18,6 +18,7 @@ import core_backup as backup
 import core_docs as docs
 import core_health as health
 import core_seed as seed
+import core_keyboard as kbd
 from core_access import access_middleware
 import h_chatlock as chatlock
 import h_chatset as chatset
@@ -40,6 +41,30 @@ import h_adminpanel as adminpanel
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
 log = logging.getLogger("irisbot")
+
+
+async def keyboard_middleware(handler, event, data: dict):
+    """Нажатие кнопки нижнего меню = обычная команда.
+
+    Кнопка присылает текст вида «🍬 Баланс» — подменяем его на «баланс»,
+    дальше сообщение идёт по обычному пути и его ловит нужный хэндлер.
+    """
+    text = getattr(event, "text", None)
+    if text:
+        cmd = kbd.resolve(text)
+        if cmd:
+            try:
+                copy = event.model_copy(update={"text": cmd})
+                bot = data.get("bot") or getattr(event, "bot", None)
+                if bot is not None:
+                    try:
+                        copy = copy.as_(bot)
+                    except Exception:
+                        pass
+                event = copy
+            except Exception:
+                pass
+    return await handler(event, data)
 
 
 async def user_middleware(handler, event, data: dict):
@@ -103,12 +128,44 @@ async def set_commands(bot: Bot) -> None:
         log.warning("меню команд: %s", e)
 
 
+# Владелец бота. Дублируется здесь специально: если на хостинге почему-то
+# остался старый config.py, бот всё равно поднимется, а не уйдёт в цикл
+# падений с «OWNER_ID не задан».
+FALLBACK_OWNER = 8412527198          # @Simba253
+
+
+def _selfheal_config() -> None:
+    """Чиним неполный config.py, чтобы бот не падал при частичной заливке."""
+    if not getattr(config, "OWNER_ID", 0):
+        config.OWNER_ID = FALLBACK_OWNER
+        log.warning("OWNER_ID пуст — подставил владельца из кода: %s",
+                    config.OWNER_ID)
+    if not getattr(config, "DEFAULT_OWNER", 0):
+        config.DEFAULT_OWNER = config.OWNER_ID or FALLBACK_OWNER
+    admins = set(getattr(config, "ADMINS", []) or [])
+    admins.add(config.OWNER_ID)
+    config.ADMINS = sorted(admins - {0})
+    if not getattr(config, "STORAGE_INFO", None):
+        try:
+            import core_storage as _st
+            config.STORAGE_INFO = _st.INFO
+            config.DATA_DIR = _st.DATA_DIR
+            config.DB_PATH = _st.DB_FILE
+            log.warning("config.py устарел — путь к базе взят из storage")
+        except Exception:
+            config.STORAGE_INFO = {"dir": str(getattr(config, "DB_PATH", "?")),
+                                   "boots": 0, "db_existed": False,
+                                   "persistent": False}
+
+
 async def main() -> None:
+    _selfheal_config()
     config.validate()
 
+    info = config.STORAGE_INFO
     log.info("Хранилище: %s (запуск №%d, база на месте: %s)",
-             config.STORAGE_INFO["dir"], config.STORAGE_INFO["boots"],
-             "да" if config.STORAGE_INFO["db_existed"] else "нет")
+             info.get("dir"), info.get("boots", 0),
+             "да" if info.get("db_existed") else "нет")
 
     bot = Bot(token=config.BOT_TOKEN,
               default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -127,6 +184,7 @@ async def main() -> None:
         log.warning("seed: %s", e)
 
     dp = Dispatcher()
+    dp.message.middleware(keyboard_middleware)
     dp.message.middleware(user_middleware)
     dp.callback_query.middleware(user_middleware)
 

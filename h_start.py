@@ -13,6 +13,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
 
 import db
 from config import START_BALANCE
+import core_keyboard as kb
 from core_registry import Cmd
 from utils import mention_id, money
 
@@ -35,6 +36,9 @@ async def send_captcha(message: Message) -> None:
     options = others + [right]
     random.shuffle(options)
     _captcha[message.from_user.id] = {"right": right, "tries": 0, "ts": time.time()}
+    # на время капчи нижнее меню убираем — откроется сразу после проверки
+    await message.answer("🛡 Проверка, что вы человек…",
+                         reply_markup=kb.hide())
     await message.answer(
         f"🛡 <b>Проверка, что вы человек</b>\n\n"
         f"Нажмите на этот символ: <b>{right}</b>\n\n"
@@ -63,7 +67,15 @@ async def cb_captcha(call: CallbackQuery):
     await db.execute("UPDATE users SET verified=1 WHERE user_id=?", (call.from_user.id,))
     u = await db.get_user(call.from_user.id)
     await call.message.edit_text(await main_text(call.from_user.first_name, u),
-                                 reply_markup=main_kb())
+                                 reply_markup=await main_kb(call.from_user.id))
+    # открываем постоянное меню внизу экрана — теперь оно всегда под рукой
+    try:
+        await call.message.answer(
+            "⌨️ <b>Меню открыто</b>\n"
+            "Кнопки внизу экрана — можно пользоваться без команд.",
+            reply_markup=await kb.main_menu(call.from_user.id))
+    except Exception:
+        pass
     await call.answer("✅ Проверка пройдена!")
 
 
@@ -75,8 +87,9 @@ async def main_text(name: str | None, u) -> str:
             f"Выберите раздел ниже 👇")
 
 
-def main_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+async def main_kb(uid: int = 0) -> InlineKeyboardMarkup:
+    """Главное меню. Кнопка админ-панели видна только администрации."""
+    rows = [
         [InlineKeyboardButton(text="➕ Добавить в беседу", callback_data="mm:add"),
          InlineKeyboardButton(text="⚙️ Установка", callback_data="mm:setup")],
         [InlineKeyboardButton(text="🍬 Что такое ириски", callback_data="mm:iris"),
@@ -86,7 +99,16 @@ def main_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💊 Граммы и игры", callback_data="mm:grams")],
         [InlineKeyboardButton(text="🎁 Бонусы", callback_data="mm:bonus"),
          InlineKeyboardButton(text="📖 Команды", callback_data="mm:cmds")],
-    ])
+    ]
+    if uid:
+        try:
+            from h_adminpanel import is_staff
+            if await is_staff(uid):
+                rows.insert(0, [InlineKeyboardButton(
+                    text="🛡 АДМИН-ПАНЕЛЬ", callback_data="ap:main")])
+        except Exception:
+            pass
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def back_kb(extra: list[list[InlineKeyboardButton]] | None = None) -> InlineKeyboardMarkup:
@@ -105,7 +127,7 @@ async def cmd_start(message: Message):
         return await message.answer(await grams_text(message.from_user.id),
                                     reply_markup=await grams_kb(message.from_user.id))
     await message.answer(await main_text(message.from_user.first_name, u),
-                         reply_markup=main_kb())
+                         reply_markup=await main_kb(message.from_user.id))
 
 
 async def grams_text(uid: int) -> str:
@@ -162,7 +184,18 @@ async def cmd_menu(message: Message, **kw):
     if not u["verified"]:
         return await send_captcha(message)
     await message.answer(await main_text(message.from_user.first_name, u),
-                         reply_markup=main_kb())
+                         reply_markup=await main_kb(message.from_user.id))
+    await _ensure_keyboard(message)
+
+
+async def _ensure_keyboard(message: Message) -> None:
+    """Держим нижнее меню открытым: если пропало — вернём."""
+    try:
+        await message.answer("⌨️ Меню внизу экрана",
+                             reply_markup=await kb.main_menu(message.from_user.id))
+    except Exception:
+        pass
+    await _ensure_keyboard(message)
 
 
 ADD_TEXT = """➕ <b>Как добавить бота в беседу</b>
@@ -255,7 +288,7 @@ async def cb_menu(call: CallbackQuery, bot: Bot):
     if what == "main":
         u = await db.get_user(uid)
         await call.message.edit_text(await main_text(call.from_user.first_name, u),
-                                     reply_markup=main_kb())
+                                     reply_markup=await main_kb(uid))
         return await call.answer()
 
     if what == "add":
@@ -411,7 +444,7 @@ async def on_paid(message: Message):
         await message.answer(
             f"✅ <b>Оплачено!</b>\n\n{title}\n"
             f"Начислено: <b>{money(amount)}</b>\nБаланс: <b>{money(bal)}</b>\n\n"
-            f"Спасибо за поддержку! ⭐️", reply_markup=main_kb())
+            f"Спасибо за поддержку! ⭐️", reply_markup=await main_kb(uid))
     else:
         await db.execute(
             "INSERT INTO vip (user_id, until, level) VALUES (?,?,1) "
@@ -419,7 +452,7 @@ async def on_paid(message: Message):
             (uid, int(time.time()) + 30 * 86400, int(time.time()) + 30 * 86400))
         await message.answer(
             f"✅ <b>Оплачено!</b>\n\n👑 VIP активирован на 30 дней.\n"
-            f"Ежедневный бонус теперь удвоенный!", reply_markup=main_kb())
+            f"Ежедневный бонус теперь удвоенный!", reply_markup=await main_kb(uid))
 
 
 

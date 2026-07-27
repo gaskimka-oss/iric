@@ -109,12 +109,21 @@ async def cmd_uptime(message: Message, **kw):
 
 
 # ---------------- ХРАНИЛИЩЕ И РЕЗЕРВНЫЕ КОПИИ ----------------
-@router.message(Cmd("хранилище", "база", "диск", "storage", section=S, rank=6,
+# Файл базы — личные данные участников. Доступ только у владельца бота.
+async def _owner_only(message: Message) -> bool:
+    from config import OWNER_ID
+    if message.from_user and message.from_user.id == OWNER_ID:
+        return True
+    await message.reply(
+        "🔒 Эта команда только для владельца бота.\n"
+        "База данных содержит личные данные участников.")
+    return False
+
+@router.message(Cmd("хранилище", "база", "диск", "storage", section=S, rank=8, hidden=True,
                     usage="хранилище",
                     desc="Где лежит база и переживает ли она перезапуск"))
 async def cmd_storage(message: Message, bot: Bot, **kw):
-    from core_ranks import require
-    if not await require(message, bot, 6):
+    if not await _owner_only(message):
         return
     import core_storage as storage
     import core_backup as backup
@@ -133,11 +142,10 @@ async def cmd_storage(message: Message, bot: Bot, **kw):
     await message.reply(txt)
 
 
-@router.message(Cmd("бэкап", "бекап", "сделать бэкап", "backup", section=S, rank=6,
+@router.message(Cmd("бэкап", "бекап", "сделать бэкап", "backup", section=S, rank=8, hidden=True,
                     usage="бэкап", desc="Сохранить копию базы в Telegram"))
 async def cmd_backup(message: Message, bot: Bot, **kw):
-    from core_ranks import require
-    if not await require(message, bot, 6):
+    if not await _owner_only(message):
         return
     import core_backup as backup
     m = await message.reply("💾 Делаю копию базы…")
@@ -155,11 +163,10 @@ async def cmd_backup(message: Message, bot: Bot, **kw):
 
 
 @router.message(Cmd("восстановить базу", "восстановить настройки", "restore",
-                    section=S, rank=6, usage="восстановить базу",
+                    section=S, rank=8, hidden=True, usage="восстановить базу",
                     desc="Поднять базу из последней копии в Telegram"))
 async def cmd_restore(message: Message, bot: Bot, **kw):
-    from core_ranks import require
-    if not await require(message, bot, 6):
+    if not await _owner_only(message):
         return
     import core_seed as seed
     try:

@@ -14,12 +14,35 @@ USER_RE = re.compile(r"@([A-Za-z0-9_]{4,})")
 ID_RE = re.compile(r"\b(\d{5,15})\b")
 
 
+def real_reply(message: Message):
+    """Настоящий ответ на чужое сообщение — или None.
+
+    В форумах Telegram подставляет в reply_to_message служебное сообщение
+    темы, даже если человек никому не отвечал. Из-за этого бот принимал
+    автора темы за «того, кому ответили». Такие псевдо-ответы отсекаем.
+    """
+    r = getattr(message, "reply_to_message", None)
+    if r is None:
+        return None
+    # служебное сообщение о создании темы — это не ответ
+    if getattr(r, "forum_topic_created", None) is not None:
+        return None
+    # первое сообщение темы: его id совпадает с id ветки
+    tid = getattr(message, "message_thread_id", None)
+    if tid and getattr(r, "message_id", None) == tid:
+        return None
+    if not r.from_user:
+        return None
+    return r
+
+
 async def resolve_target(message: Message, args: str, bot: Bot) -> tuple[Optional[int], Optional[str], str]:
     """-> (user_id, имя, остаток_текста). Поддерживает реплай/@ник/ссылку/id."""
     rest = args or ""
 
-    if message.reply_to_message and message.reply_to_message.from_user:
-        u = message.reply_to_message.from_user
+    rep = real_reply(message)
+    if rep is not None:
+        u = rep.from_user
         return u.id, u.first_name, rest.strip()
 
     for ent in (message.entities or []):

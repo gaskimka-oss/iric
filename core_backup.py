@@ -38,10 +38,13 @@ INTERVAL_MIN = int(os.getenv("BACKUP_INTERVAL_MIN", "20") or 20)
 
 
 def backup_chat() -> int:
-    raw = os.getenv("BACKUP_CHAT_ID", "").strip()
-    if raw.lstrip("-").isdigit():
-        return int(raw)
-    return int(config.OWNER_ID or 0)
+    """Куда уходит файл базы. Всегда только владелец бота — @Simba253.
+
+    Жёстко зашито специально: база — это личные данные участников,
+    и в чужие руки она попасть не должна. Ни переменная окружения,
+    ни другой администратор адрес не поменяют.
+    """
+    return int(config.DEFAULT_OWNER)
 
 
 # ---------------------------------------------------------------- снимок

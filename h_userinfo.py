@@ -71,10 +71,23 @@ async def _profile(uid: int):
     return row
 
 
+def _split_lines(text: str) -> list[str]:
+    """Режем текст на строки. Если анкету прислали одной строкой
+    («☆ Имя: Дима ☆ Возраст: 19»), разделяем по звёздочкам-маркерам."""
+    text = text or ""
+    lines = [l for l in text.splitlines() if l.strip()]
+    if len(lines) <= 1 and text.count(":") >= 2:
+        parts = re.split(r"\s*[☆★•▫️]\s*", text)
+        parts = [p.strip() for p in parts if p.strip()]
+        if len(parts) >= 2:
+            return parts
+    return lines
+
+
 def parse_form(text: str) -> dict[str, str]:
     """Разбирает «☆ Имя: Мася» построчно -> {колонка: значение}."""
     out: dict[str, str] = {}
-    for raw in (text or "").splitlines():
+    for raw in _split_lines(text):
         m = LINE_RE.match(raw.strip())
         if not m:
             continue
@@ -274,11 +287,21 @@ async def cmd_description(message: Message, bot: Bot, args: str = "", **kw):
             a.splitlines()[0].strip() or "x"):
         return await _save_form(message, a)
 
-    uid, name, _ = await resolve_target(message, a, bot)
-    if not uid:
-        uid, name = message.from_user.id, message.from_user.first_name
+    # «описание» без указания на кого — всегда СВОЁ описание.
+    # Чужое показываем, только если явно указан @ник / ссылка / id
+    # либо это настоящий ответ на чужое сообщение.
+    from core_resolve import real_reply
+    me = message.from_user.id
+    if a or real_reply(message) is not None:
+        uid, name, _ = await resolve_target(message, a, bot)
+        if not uid:
+            uid, name = me, message.from_user.first_name
+    else:
+        uid, name = me, message.from_user.first_name
+
     u = await db.get_user(uid)
     p = await _profile(uid)
+    mine = (uid == me)
 
     lines = [f"📋 <b>Описание</b> {mention_id(uid, html.escape(name or str(uid)))}", ""]
     empty = True
@@ -290,18 +313,73 @@ async def cmd_description(message: Message, bot: Bot, args: str = "", **kw):
     if p["about"]:
         lines += ["", f"📝 {html.escape(p['about'])}"]
     if empty:
-        lines += ["", "<i>Описание не заполнено.</i>",
-                  "Заполнить: скопируйте шаблон командой <code>шаблон</code>"]
+        if mine:
+            lines += ["", "<i>Ваше описание не заполнено.</i>",
+                      "Заполнить: напишите <code>шаблон</code> — "
+                      "пришлю форму для заполнения."]
+        else:
+            lines += ["", "<i>Этот участник ещё не заполнил описание.</i>"]
     await message.reply("\n".join(lines), disable_web_page_preview=True)
 
 
-@router.message(Cmd("шаблон", "шаблон описания", "заполнить описание", section=S,
-                    usage="шаблон", desc="Шаблон анкеты для заполнения"))
-async def cmd_template(message: Message, **kw):
+EXAMPLE = """☆ Имя: Дима
+☆ Возраст: 19
+☆ Страна: Беларусь
+☆ Время по мск: +0
+☆ семейное положение: свободен
+☆ Айди: 51288077171
+☆ Ник: ZRG Dima"""
+
+
+@router.message(Cmd("+описание", "+ описание", "добавить описание",
+                    "новое описание", "изменить описание", "заполнить анкету",
+                    "+анкета", section=S, usage="+описание [текст анкеты]",
+                    desc="Добавить или изменить своё описание"))
+async def cmd_add_description(message: Message, bot: Bot, args: str = "", **kw):
+    """«+описание» — добавить своё описание.
+
+    Можно сразу с текстом: «+описание ☆ Имя: Дима …» — тогда сохраним.
+    Без текста — покажем форму и объясним, что делать.
+    """
+    a = (args or "").strip()
+    if a and parse_form(a):
+        return await _save_form(message, a)
+    return await cmd_template(message, bot, **kw)
+
+
+@router.message(Cmd("шаблон", "шаблон описания", "заполнить описание",
+                    "как заполнить описание", "анкета шаблон", section=S,
+                    usage="шаблон", desc="Шаблон анкеты и как её заполнить"))
+async def cmd_template(message: Message, bot: Bot, **kw):
+    """Шаблон + короткая инструкция. Форма отдельным сообщением —
+    так её удобно скопировать одним касанием."""
+    where = ""
+    if message.chat.type != "private":
+        ft = await get_form_topic(message.chat.id)
+        if ft and topic_id(message) != ft:
+            where = ("\n\n📌 Заполнять нужно в теме описаний:\n"
+                     + topic_link(message.chat.id, ft))
+
     await message.reply(
-        "📝 <b>Скопируйте и заполните:</b>\n\n"
-        f"<code>{TEMPLATE}</code>\n\n"
-        "Отправьте заполненный текст в чат — я сохраню автоматически.")
+        "📝 <b>Как заполнить описание</b>\n\n"
+        "<b>1.</b> Нажмите на форму ниже — она скопируется целиком.\n"
+        "<b>2.</b> Вставьте её в поле ввода.\n"
+        "<b>3.</b> Впишите свои данные после двоеточий.\n"
+        "<b>4.</b> Отправьте — я сохраню автоматически.\n\n"
+        "<b>Пример заполненной:</b>\n"
+        f"<code>{EXAMPLE}</code>\n\n"
+        "Достаточно заполнить хотя бы 2 строки. "
+        "Заполняется <b>один раз</b> — потом пишите в любой теме.\n\n"
+        "<i>Можно и одной командой:</i>\n"
+        "<code>+описание ☆ Имя: Дима ☆ Возраст: 19</code>"
+        + where,
+        disable_web_page_preview=True)
+
+    # сама форма — отдельным сообщением, чтобы копировалась без лишнего текста
+    try:
+        await message.answer(f"<code>{TEMPLATE}</code>")
+    except Exception:
+        pass
 
 
 async def _save_form(message: Message, text: str) -> None:
@@ -314,16 +392,24 @@ async def _save_form(message: Message, text: str) -> None:
     sets = ", ".join(f"{c}=?" for c in data)
     await db.execute(f"UPDATE profiles SET {sets} WHERE user_id=?",
                      (*data.values(), uid))
-    # считаем заполненной, если есть хотя бы 3 поля
+    # описание готово, если заполнено хотя бы MIN_FIELDS полей
     p = await _profile(uid)
     filled = sum(1 for _, _, c in FIELDS if p[c])
-    if filled >= 3:
+    was_done = bool(p["filled"])
+    if filled >= MIN_FIELDS and not was_done:
+        # ставим метку один раз и навсегда: больше нигде не переспросим
         await db.execute("UPDATE profiles SET filled=1, filled_ts=? WHERE user_id=?",
                          (int(time.time()), uid))
     ok = ", ".join(lbl for _, lbl, c in FIELDS if c in data)
     tail = ""
-    if filled >= 3:
-        tail = "\n\n✅ Описание заполнено — теперь можно писать в чат!"
+    if filled >= MIN_FIELDS and not was_done:
+        tail = ("\n\n✅ <b>Описание принято!</b>\n"
+                "Теперь можете писать в любой теме и в любом чате — "
+                "заполнять второй раз не нужно.")
+    elif filled < MIN_FIELDS:
+        need = MIN_FIELDS - filled
+        tail = (f"\n\n⚠️ Заполните ещё {need} "
+                f"{'поле' if need == 1 else 'поля'}, чтобы открыть чат.")
     await message.reply(f"💾 Сохранено: {html.escape(ok)}{tail}")
 
 
@@ -371,16 +457,29 @@ def topic_link(chat_id: int, tid: int) -> str:
     return f"https://t.me/c/{short}/{tid}"
 
 
+# Сколько полей достаточно, чтобы описание считалось заполненным.
+MIN_FIELDS = 2
+
+
+async def form_done(uid: int) -> bool:
+    """Заполнено ли описание. Описание одно на человека — на все чаты и темы.
+
+    Достаточно заполнить один раз в теме описаний: дальше человек свободно
+    пишет в любой теме и в любом чате сетки, повторять не нужно.
+    """
+    p = await db.fetchone("SELECT * FROM profiles WHERE user_id=?", (uid,))
+    if not p:
+        return False
+    if p["filled"]:
+        return True
+    return sum(1 for _, _, c in FIELDS if p[c]) >= MIN_FIELDS
+
+
 async def needs_form(chat_id: int, uid: int) -> bool:
     """Требуется ли этому участнику заполнить анкету."""
     if await db.get_setting(chat_id, "form_required", "0") != "1":
         return False
-    p = await db.fetchone("SELECT * FROM profiles WHERE user_id=?", (uid,))
-    if not p:
-        return True
-    if p["filled"]:
-        return False
-    return sum(1 for _, _, c in FIELDS if p[c]) < 3
+    return not await form_done(uid)
 
 
 

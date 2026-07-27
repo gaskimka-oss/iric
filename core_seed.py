@@ -39,9 +39,35 @@ STAFF: dict[int, dict[str, tuple[str, int, int]]] = {
 }
 
 
+async def mark_filled_profiles() -> int:
+    """Тем, кто уже присылал анкету, ставим метку «заполнено».
+
+    Раньше метка требовала 3 распознанных поля, из-за чего людей
+    переспрашивали в других темах. Теперь достаточно двух — проходим
+    по старым профилям и проставляем метку задним числом.
+    """
+    from h_userinfo import FIELDS, MIN_FIELDS
+    rows = await db.fetchall("SELECT * FROM profiles WHERE filled=0")
+    n = 0
+    for p in rows:
+        if sum(1 for _, _, c in FIELDS if c in p.keys() and p[c]) >= MIN_FIELDS:
+            await db.execute(
+                "UPDATE profiles SET filled=1, filled_ts=COALESCE(filled_ts,?) "
+                "WHERE user_id=?", (int(time.time()), p["user_id"]))
+            n += 1
+    if n:
+        log.info("Отмечено как заполненные: %d анкет", n)
+    return n
+
+
 async def apply() -> None:
     now = int(time.time())
     added_s = added_st = 0
+
+    try:
+        await mark_filled_profiles()
+    except Exception as e:
+        log.warning("отметка анкет: %s", e)
 
     for chat_id, kv in SETTINGS.items():
         for key, val in kv.items():

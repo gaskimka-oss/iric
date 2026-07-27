@@ -19,7 +19,18 @@ def _int_list(raw: str) -> list[int]:
 
 # --- Основное -------------------------------------------------------------
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "").strip()
-OWNER_ID: int = int(os.getenv("OWNER_ID", "0") or 0)
+# ID владельца зашит в код: переменная окружения на хостинге не долетает.
+# Если OWNER_ID всё же задан в панели — возьмётся оттуда.
+DEFAULT_OWNER = 8412527198          # @Simba253
+
+
+def _owner() -> int:
+    """Берём ID из панели хостинга, но кривое значение бота не роняет."""
+    raw = (os.getenv("OWNER_ID") or "").strip()
+    return int(raw) if raw.lstrip("-").isdigit() and int(raw) > 0 else DEFAULT_OWNER
+
+
+OWNER_ID: int = _owner()
 ADMINS: list[int] = list({OWNER_ID, *_int_list(os.getenv("ADMINS", ""))} - {0})
 
 # Каталог для базы выбирается автоматически: ищем то место на хостинге,
@@ -73,9 +84,6 @@ def validate() -> None:
             "Токен берётся у @BotFather."
         )
     if not OWNER_ID:
-        raise SystemExit(
-            "❌ OWNER_ID не задан.\n"
-            "• Локально: впишите OWNER_ID=... в .env\n"
-            "• На хостинге: добавьте переменную окружения OWNER_ID\n"
-            "Свой ID узнайте у @userinfobot."
-        )
+        # не роняем бота: он полезен и без владельца, просто без команд ранга 8
+        print("⚠️  OWNER_ID не задан — команды владельца недоступны. "
+              "Добавьте переменную OWNER_ID на хостинге.")

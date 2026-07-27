@@ -169,6 +169,16 @@ async def on_new_members(message: Message, bot: Bot):
                 f"<code>{TEMPLATE}</code>")
 
 
+async def _del_later(msg, delay: int = 60) -> None:
+    """Убрать служебную подсказку через delay секунд."""
+    import asyncio
+    try:
+        await asyncio.sleep(delay)
+        await msg.delete()
+    except Exception:
+        pass
+
+
 @router.message(F.text | F.caption)
 async def activity(message: Message, bot: Bot):
     """XP, монеты, триггеры и проверка обязательной анкеты."""
@@ -193,8 +203,9 @@ async def activity(message: Message, bot: Bot):
         pass
 
     # --- присланная анкета: сохраняем в любом чате ----------------------
-    from h_userinfo import LINE_RE as _LR, parse_form as _pf, _save_form as _sf
-    _lines = [l for l in text_raw.splitlines() if l.strip()]
+    from h_userinfo import (LINE_RE as _LR, parse_form as _pf,
+                                   _save_form as _sf, _split_lines as _sl)
+    _lines = _sl(text_raw)
     if len(_lines) >= 2 and sum(1 for l in _lines if _LR.match(l.strip())) >= 2:
         if _pf(text_raw):
             await _sf(message, text_raw)
@@ -203,17 +214,45 @@ async def activity(message: Message, bot: Bot):
     # --- обязательная анкета -------------------------------------------
     if message.chat.type != "private":
         from h_userinfo import (LINE_RE, TEMPLATE, _save_form,
-                                       get_form_topic, needs_form, topic_id,
-                                       topic_link)
+                                       _split_lines, get_form_topic,
+                                       needs_form, topic_id, topic_link)
         if await needs_form(message.chat.id, uid):
             from core_ranks import effective_rank
-            if await effective_rank(message, bot) < 1:
+            _rank = await effective_rank(message, bot)
+            if _rank >= 1:
+                # Админ без описания: писать ему можно везде, но в теме
+                # анкет всё лишнее всё равно чистим — кроме самой анкеты.
+                _ft = await get_form_topic(message.chat.id)
+                if _ft and topic_id(message) == _ft:
+                    _lines = _split_lines(text_raw)
+                    if sum(1 for l in _lines if LINE_RE.match(l.strip())) >= 2:
+                        await _save_form(message, text_raw)
+                        return
+                    try:
+                        await message.delete()
+                    except Exception:
+                        pass
+                    if not await db.cooldown_left(uid, "form_done_warn", 120):
+                        await db.set_cooldown(uid, "form_done_warn")
+                        try:
+                            warn = await message.bot.send_message(
+                                message.chat.id,
+                                f"🧹 {mention(message.from_user)}, эта тема только "
+                                f"для заполнения описаний.\n"
+                                f"Общаться можно в других темах.",
+                                message_thread_id=_ft)
+                            import asyncio as _a
+                            _a.create_task(_del_later(warn, 60))
+                        except Exception:
+                            pass
+                    return
+            if _rank < 1:
                 form_topic = await get_form_topic(message.chat.id)
                 here = topic_id(message)
                 in_form_topic = (not form_topic) or (here == form_topic)
 
                 # анкету принимаем только в назначенной теме
-                lines = [l for l in text_raw.splitlines() if l.strip()]
+                lines = _split_lines(text_raw)
                 hits = sum(1 for l in lines if LINE_RE.match(l.strip()))
                 if hits >= 2 and in_form_topic:
                     await _save_form(message, text_raw)
@@ -250,24 +289,48 @@ async def activity(message: Message, bot: Bot):
                             pass
                 return
         else:
-            # описание уже заполнено — в теме описаний писать больше нельзя
-            from core_ranks import effective_rank
+            # Описание уже есть. Тема описаний — только под анкеты:
+            # всё лишнее удаляем у ВСЕХ, включая админов и лидера.
             form_topic = await get_form_topic(message.chat.id)
-            if (form_topic and topic_id(message) == form_topic
-                    and await effective_rank(message, bot) < 1):
+            if form_topic and topic_id(message) == form_topic:
+                lines = _split_lines(text_raw)
+                hits = sum(1 for l in lines if LINE_RE.match(l.strip()))
+                resend = hits >= 2          # пытается заполнить повторно
+
                 try:
                     await message.delete()
                 except Exception:
                     pass
-                if not await db.cooldown_left(uid, "form_done_warn", 120):
-                    await db.set_cooldown(uid, "form_done_warn")
+
+                if resend:
+                    # повторная анкета: описание уже есть, второй раз не нужно
+                    if not await db.cooldown_left(uid, "form_dup", 60):
+                        await db.set_cooldown(uid, "form_dup")
+                        note = (f"⚠️ {mention(message.from_user)}, у вас уже есть "
+                                f"описание — заполнять второй раз не нужно.\n\n"
+                                f"Посмотреть своё: <code>описание</code>\n"
+                                f"Изменить: напишите админу.")
+                    else:
+                        note = ""
+                else:
+                    # обычная болтовня в теме анкет
+                    if not await db.cooldown_left(uid, "form_done_warn", 120):
+                        await db.set_cooldown(uid, "form_done_warn")
+                        note = (f"🧹 {mention(message.from_user)}, эта тема только "
+                                f"для заполнения описаний.\n"
+                                f"Общаться можно в других темах.")
+                    else:
+                        note = ""
+
+                if note:
                     try:
-                        await message.bot.send_message(
-                            message.chat.id,
-                            f"✅ {mention(message.from_user)}, ваше описание уже заполнено.\n"
-                            f"Эта тема — только для заполнения анкет. "
-                            f"Общайтесь в других темах!",
-                            message_thread_id=form_topic)
+                        warn = await message.bot.send_message(
+                            message.chat.id, note,
+                            message_thread_id=form_topic,
+                            disable_web_page_preview=True)
+                        # подсказка сама исчезнет, чтобы не копилась
+                        import asyncio as _a
+                        _a.create_task(_del_later(warn, 60))
                     except Exception:
                         pass
                 return
