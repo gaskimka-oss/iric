@@ -15,7 +15,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
 
 import db
 from core_registry import Cmd
-from core_resolve import resolve_target
+from core_resolve import human_period, parse_period, resolve_target
 from utils import hms, mention, mention_id, parse_amount
 
 router = Router(name="grams")
@@ -311,7 +311,7 @@ def _mines_kb(key: str, st: dict, over: bool = False) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(
             text=f"💰 Забрать {int(st['bet'] * mult):,} {GRAM}".replace(",", " "),
             callback_data=f"mn:t:{key}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return InlineKeyboardMarkup(inline_keyboard=rows)   # игра — без «в меню»
 
 
 @router.message(Cmd("мины", "mines", section=S, usage="мины {ставка}",
@@ -872,3 +872,125 @@ async def cb_vip(call: CallbackQuery):
     except Exception:
         pass
     await call.answer("👑 Выпка активирована!")
+
+
+# ═══════════════ ВЫДАЧА ВЫПКИ АДМИНОМ ═══════════════
+@router.message(Cmd("выдать выпку", "дать выпку", "+выпка", "выпку",
+                    "начислить выпку", section=S, rank=4,
+                    usage="выдать выпку @ник 7 дней",
+                    desc="Выдать участнику выпку бесплатно (ранг 4+)"))
+async def cmd_vip_give(message: Message, bot: Bot, args: str = "", **kw):
+    """Админ выдаёт выпку без списания ирисок.
+
+    выдать выпку @ник 7 дней   — на срок
+    выдать выпку @ник          — на 5 дней по умолчанию
+    выдать выпку @ник навсегда — бессрочно
+    """
+    from core_ranks import require
+    if not await require(message, bot, 4):
+        return
+
+    a = (args or "").strip()
+    if not a and not message.reply_to_message:
+        return await message.reply(
+            "👑 <b>Выдать выпку</b>\n\n"
+            "<code>выдать выпку @ник 7 дней</code>\n"
+            "<code>выдать выпку @ник 1 месяц</code>\n"
+            "<code>выдать выпку @ник навсегда</code>\n"
+            "<code>выдать выпку @ник</code> — на 5 дней\n\n"
+            "Или ответом на сообщение человека.\n\n"
+            "Снять: <code>снять выпку @ник</code>\n"
+            "Список: <code>кто с выпкой</code>")
+
+    uid, name, rest = await resolve_target(message, a, bot)
+    if not uid:
+        return await message.reply(
+            "🤔 Кому выдать? Укажите <code>@ник</code> "
+            "или ответьте на сообщение человека.")
+
+    rest = (rest or "").strip().lower()
+    forever = rest in {"навсегда", "вечно", "бессрочно", "forever"}
+    if forever:
+        secs = 0
+    else:
+        secs, _ = parse_period(rest)
+        if not secs:
+            secs = VIP_DAYS * 86400
+
+    row = await db.fetchone("SELECT until FROM vip WHERE user_id=?", (uid,))
+    had = row and int(row["until"] or 0) > int(time.time())
+    if forever:
+        until = 4102444800          # 01.01.2100 — практически навсегда
+    else:
+        base = max(int(time.time()), int(row["until"]) if row else 0)
+        until = base + secs
+
+    await db.execute(
+        "INSERT INTO vip (user_id, until, level) VALUES (?,?,1) "
+        "ON CONFLICT(user_id) DO UPDATE SET until=excluded.until", (uid, until))
+
+    term = "навсегда" if forever else human_period(secs)
+    when = ("" if forever else
+            f"\n📅 До: <b>{time.strftime('%d.%m.%Y %H:%M', time.localtime(until))}</b>")
+    await message.reply(
+        f"👑 <b>Выпка выдана</b>\n"
+        f"👤 {mention_id(uid, name)}\n"
+        f"⏱ Срок: <b>{term}</b>"
+        f"{' <i>(продлена)</i>' if had and not forever else ''}"
+        f"{when}\n"
+        f"🎁 Бесплатно, от {mention_id(message.from_user.id, message.from_user.first_name)}")
+
+    try:
+        await bot.send_message(
+            uid,
+            f"👑 <b>Вам выдали выпку!</b>\n\n"
+            f"⏱ Срок: <b>{term}</b>{when}\n\n"
+            f"Что даёт: удвоенный бонус, приоритет в играх "
+            f"и значок 👑 в профиле.")
+    except Exception:
+        pass
+
+
+@router.message(Cmd("снять выпку", "убрать выпку", "-выпка", "забрать выпку",
+                    section=S, rank=4, usage="снять выпку @ник",
+                    desc="Снять выпку у участника (ранг 4+)"))
+async def cmd_vip_take(message: Message, bot: Bot, args: str = "", **kw):
+    from core_ranks import require
+    if not await require(message, bot, 4):
+        return
+    a = (args or "").strip()
+    uid, name, _ = await resolve_target(message, a, bot)
+    if not uid:
+        return await message.reply(
+            "🤔 У кого снять? Укажите <code>@ник</code> или ответьте "
+            "на сообщение.")
+    row = await db.fetchone("SELECT until FROM vip WHERE user_id=?", (uid,))
+    if not row or int(row["until"] or 0) <= int(time.time()):
+        return await message.reply(f"У {mention_id(uid, name)} и так нет выпки.")
+    await db.execute("DELETE FROM vip WHERE user_id=?", (uid,))
+    await message.reply(f"🚫 Выпка снята у {mention_id(uid, name)}")
+
+
+@router.message(Cmd("кто с выпкой", "список выпок", "выпки", "вип лист",
+                    section=S, rank=1, usage="кто с выпкой",
+                    desc="Список участников с выпкой"))
+async def cmd_vip_list(message: Message, bot: Bot, **kw):
+    from core_ranks import require
+    if not await require(message, bot, 1):
+        return
+    now = int(time.time())
+    rows = await db.fetchall(
+        "SELECT v.user_id, v.until, u.first_name, u.username FROM vip v "
+        "LEFT JOIN users u ON u.user_id=v.user_id "
+        "WHERE v.until > ? ORDER BY v.until DESC LIMIT 40", (now,))
+    if not rows:
+        return await message.reply(
+            "👑 Сейчас ни у кого нет выпки.\n\n"
+            "Выдать: <code>выдать выпку @ник 7 дней</code>")
+    out = [f"👑 <b>С выпкой: {len(rows)}</b>\n"]
+    for r in rows:
+        nm = r["first_name"] or (f"@{r['username']}" if r["username"] else str(r["user_id"]))
+        left = int(r["until"]) - now
+        term = "навсегда" if int(r["until"]) > 4000000000 else human_period(left)
+        out.append(f"👑 {mention_id(r['user_id'], nm)} — ещё {term}")
+    await message.reply("\n".join(out), disable_web_page_preview=True)

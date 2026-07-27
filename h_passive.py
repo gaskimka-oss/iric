@@ -161,12 +161,19 @@ async def on_new_members(message: Message, bot: Bot):
             "INSERT OR IGNORE INTO first_seen (chat_id, user_id, ts) VALUES (?,?,?)",
             (message.chat.id, u.id, int(_t.time())))
 
-        from h_userinfo import TEMPLATE, needs_form
+        from h_userinfo import (TEMPLATE, get_form_topic, needs_form,
+                                       topic_link)
         if await needs_form(message.chat.id, u.id):
-            await message.answer(
+            ft = await get_form_topic(message.chat.id)
+            where = (f"\n\n📌 Заполнять здесь:\n{topic_link(message.chat.id, ft)}"
+                     if ft else "")
+            hello = await message.answer(
                 f"📝 {mention(u)}, заполните описание, чтобы писать в чат.\n\n"
                 f"Скопируйте и отправьте, подставив свои данные:\n\n"
-                f"<code>{TEMPLATE}</code>")
+                f"<code>{TEMPLATE}</code>{where}",
+                disable_web_page_preview=True)
+            import asyncio as _a
+            _a.create_task(_del_later(hello, 300))
 
 
 async def _del_later(msg, delay: int = 60) -> None:
@@ -175,6 +182,61 @@ async def _del_later(msg, delay: int = 60) -> None:
     try:
         await asyncio.sleep(delay)
         await msg.delete()
+    except Exception:
+        pass
+
+
+# ── Медиа от тех, кто без описания ──────────────────────────────────
+MEDIA_BLOCK = (F.voice | F.video_note | F.sticker | F.animation | F.photo
+               | F.video | F.audio | F.document)
+
+
+@router.message(MEDIA_BLOCK)
+async def media_gate(message: Message, bot: Bot):
+    """Пока описание не заполнено — никаких кружочков, голосовых и медиа."""
+    if message.chat.type == "private":
+        return
+    if not message.from_user or message.from_user.is_bot:
+        return
+    uid = message.from_user.id
+
+    from h_userinfo import (get_form_topic, needs_form, topic_id,
+                                   topic_link)
+    if not await needs_form(message.chat.id, uid):
+        # описание есть — но в теме анкет всё равно не сорим
+        ft = await get_form_topic(message.chat.id)
+        if ft and topic_id(message) == ft:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+        return
+
+    from core_ranks import effective_rank
+    if await effective_rank(message, bot) >= 1:
+        return
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if await db.cooldown_left(uid, "form_media", 90):
+        return
+    await db.set_cooldown(uid, "form_media")
+    ft = await get_form_topic(message.chat.id)
+    link = topic_link(message.chat.id, ft) if ft else ""
+    try:
+        warn = await message.bot.send_message(
+            message.chat.id,
+            f"🔇 {mention(message.from_user)}, голосовые, кружочки и медиа "
+            f"будут доступны после описания.\n\n"
+            + (f"✍️ Заполнить: {link}" if link else
+               "✍️ Заполнить: команда <code>шаблон</code>"),
+            message_thread_id=ft or None,
+            disable_web_page_preview=True)
+        import asyncio as _a
+        _a.create_task(_del_later(warn, 60))
     except Exception:
         pass
 
@@ -278,10 +340,12 @@ async def activity(message: Message, bot: Bot):
                                 f"✍️ <b>Сначала заполните описание:</b>\n{link}")
                         target_thread = form_topic
                     try:
-                        await message.bot.send_message(
+                        warn = await message.bot.send_message(
                             message.chat.id, note,
                             message_thread_id=target_thread,
                             disable_web_page_preview=True)
+                        import asyncio as _a
+                        _a.create_task(_del_later(warn, 90))
                     except Exception:
                         try:
                             await message.answer(note, disable_web_page_preview=True)

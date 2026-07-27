@@ -1,6 +1,8 @@
 """Карточка пользователя «ирис инфа», описание и обязательная анкета."""
 from __future__ import annotations
 
+import asyncio
+
 import html
 import random
 import re
@@ -27,6 +29,7 @@ FIELDS: list[tuple[str, str, str]] = [
     ("семейное положение", "Семейное положение", "family"),
     ("айди", "Айди", "nick2"),
     ("ник", "Ник", "hobby"),
+    ("пол", "Пол", "gender"),
 ]
 FIELD_BY_KEY = {k: (label, col) for k, label, col in FIELDS}
 
@@ -36,19 +39,29 @@ ALIASES = {
     "возр": "возраст", "лет": "возраст",
     "мск": "время по мск", "время": "время по мск", "тз": "время по мск",
     "семья": "семейное положение", "сп": "семейное положение",
-    "id": "айди", "ид": "айди",
-    "nick": "ник", "никнейм": "ник",
+    "id": "айди", "ид": "айди", "айди в игре": "айди", "игровой id": "айди",
+    "nick": "ник", "никнейм": "ник", "ig": "ник", "игровой ник": "ник",
+    "name": "имя", "звать": "имя", "country": "страна", "age": "возраст",
+    "страна город": "страна", "время мск": "время по мск",
+    "часовой пояс": "время по мск", "семейное": "семейное положение",
+    "статус": "семейное положение", "sex": "пол", "гендер": "пол",
 }
 
 TEMPLATE = """☆ Имя:
 ☆ Возраст:
 ☆ Страна:
 ☆ Время по мск:
-☆ семейное положение:
+☆ Семейное положение:
 ☆ Айди:
-☆ Ник:"""
+☆ Ник:
+☆ Пол:"""
 
-LINE_RE = re.compile(r"^\s*[☆★*•▫️\-]*\s*([А-Яа-яЁёA-Za-z /]+?)\s*[:：]\s*(.*)$")
+# Строка анкеты: любой ведущий мусор (эмодзи, звёздочки, дефисы),
+# затем название поля, двоеточие и значение.
+# Люди пишут «🫠 ник:±KRAKEN±», «😨 Имя: Стас» — всё это надо понимать.
+LINE_RE = re.compile(
+    r"^[^0-9A-Za-zА-Яа-яЁё]*\s*([А-Яа-яЁёA-Za-z][А-Яа-яЁёA-Za-z /]*?)"
+    r"\s*[:：]\s*(.*)$")
 
 MUTE_OFF = ChatPermissions(can_send_messages=False, can_send_audios=False,
                            can_send_documents=False, can_send_photos=False,
@@ -63,6 +76,24 @@ MUTE_ON = ChatPermissions(can_send_messages=True, can_send_audios=True,
 
 
 # ---------------- helpers ----------------
+def _autodel(msg, delay: int = 120) -> None:
+    """Служебные сообщения бота сами исчезают, чтобы не сорить в чате."""
+    if msg is None:
+        return
+
+    async def _later():
+        try:
+            await asyncio.sleep(delay)
+            await msg.delete()
+        except Exception:
+            pass
+
+    try:
+        asyncio.create_task(_later())
+    except Exception:
+        pass
+
+
 async def _profile(uid: int):
     row = await db.fetchone("SELECT * FROM profiles WHERE user_id=?", (uid,))
     if not row:
@@ -282,6 +313,26 @@ async def cmd_who_are_you(message: Message, bot: Bot, **kw):
 async def cmd_description(message: Message, bot: Bot, args: str = "", **kw):
     a = (args or "").strip()
 
+    # Пока человек не заполнил анкету, команда «описание» работает
+    # ТОЛЬКО в теме описаний. Заполнил — пользуется где угодно.
+    if message.chat.type != "private" and message.from_user:
+        ft = await get_form_topic(message.chat.id)
+        if ft and topic_id(message) != ft:
+            if await needs_form(message.chat.id, message.from_user.id):
+                from core_ranks import effective_rank
+                if await effective_rank(message, bot) < 1:
+                    try:
+                        await message.delete()
+                    except Exception:
+                        pass
+                    warn = await message.answer(
+                        f"📝 {mention_id(message.from_user.id, html.escape(message.from_user.first_name or ''))}, "
+                        f"сначала заполните описание в теме:\n"
+                        f"{topic_link(message.chat.id, ft)}",
+                        disable_web_page_preview=True)
+                    _autodel(warn, 60)
+                    return
+
     # «описание» + текст анкеты -> сохраняем
     if a and ("☆" in a or ":" in a) and len(a.splitlines()) >= 1 and LINE_RE.match(
             a.splitlines()[0].strip() or "x"):
@@ -441,8 +492,7 @@ async def cmd_add_description(message: Message, bot: Bot, args: str = "", **kw):
                     "как заполнить описание", "анкета шаблон", section=S,
                     usage="шаблон", desc="Шаблон анкеты и как её заполнить"))
 async def cmd_template(message: Message, bot: Bot, **kw):
-    """Шаблон + короткая инструкция. Форма отдельным сообщением —
-    так её удобно скопировать одним касанием."""
+    """Шаблон анкеты — ОДНИМ сообщением, чтобы удобно копировать."""
     where = ""
     if message.chat.type != "private":
         ft = await get_form_topic(message.chat.id)
@@ -450,27 +500,17 @@ async def cmd_template(message: Message, bot: Bot, **kw):
             where = ("\n\n📌 Заполнять нужно в теме описаний:\n"
                      + topic_link(message.chat.id, ft))
 
-    await message.reply(
-        "📝 <b>Как заполнить описание</b>\n\n"
-        "<b>1.</b> Нажмите на форму ниже — она скопируется целиком.\n"
-        "<b>2.</b> Вставьте её в поле ввода.\n"
-        "<b>3.</b> Впишите свои данные после двоеточий.\n"
-        "<b>4.</b> Отправьте — я сохраню автоматически.\n\n"
-        "<b>Пример заполненной:</b>\n"
-        f"<code>{EXAMPLE}</code>\n\n"
+    sent = await message.reply(
+        "📝 <b>Заполните описание</b>\n\n"
+        "Нажмите на форму — она скопируется. Впишите свои данные "
+        "после двоеточий и отправьте сюда.\n\n"
+        f"<code>{TEMPLATE}</code>\n\n"
+        "Оформлять можно как угодно — хоть с эмодзи, бот поймёт.\n"
         "Достаточно заполнить хотя бы 2 строки. "
-        "Заполняется <b>один раз</b> — потом пишите в любой теме.\n\n"
-        "<i>Можно и одной командой:</i>\n"
-        "<code>+описание ☆ Имя: Дима ☆ Возраст: 19</code>"
+        "Заполняется <b>один раз</b>."
         + where,
         disable_web_page_preview=True)
-
-    # сама форма — отдельным сообщением, чтобы копировалась без лишнего текста
-    try:
-        await message.answer(f"<code>{TEMPLATE}</code>")
-    except Exception:
-        pass
-
+    _autodel(sent, 300)
 
 async def _save_form(message: Message, text: str) -> None:
     data = parse_form(text)
