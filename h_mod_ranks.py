@@ -215,7 +215,7 @@ async def cmd_remove_rank(message: Message, bot: Bot, args: str = "", **kw):
 # ---------------- Просмотр состава ----------------
 @router.message(Cmd("кто админ", "кто админы", "админы", "кто модер", "кто модеры",
                     "модераторы", "состав", "модерация", "стафф", "персонал",
-                    "админка", "список админов",
+                    "список админов",
                     section=S, usage="!админы", group_only=True,
                     desc="Показать состав модерации со звёздами"))
 async def cmd_staff(message: Message, bot: Bot, **kw):

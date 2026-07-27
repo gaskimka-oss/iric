@@ -9,6 +9,7 @@ from aiogram import Bot, F, Router
 from aiogram.types import ChatPermissions, Message
 
 import db
+import core_modlog as modlog
 import core_toxicity as toxicity
 from core_punish import log_punish
 from core_ranks import effective_rank, require
@@ -48,6 +49,10 @@ async def _delete_flag(chat_id: int) -> bool:
     return await db.get_setting(chat_id, "automod_delete", "1") == "1"
 
 
+def uid_self(message: Message) -> int:
+    return message.from_user.id if message.from_user else 0
+
+
 async def handle(message: Message, bot: Bot) -> bool:
     """Проверяет сообщение. True — нарушение обработано."""
     if message.chat.type == "private":
@@ -67,7 +72,11 @@ async def handle(message: Message, bot: Bot) -> bool:
         return False
 
     use_ai = await db.get_setting(message.chat.id, "automod_ai", "1") == "1"
-    level, reason, source = await toxicity.check(text, use_ai=use_ai)
+    strict = await db.get_setting(message.chat.id, "automod_strict", "0") == "1"
+    addressed = bool(message.reply_to_message and message.reply_to_message.from_user
+                     and message.reply_to_message.from_user.id != uid_self(message))
+    level, reason, source = await toxicity.check(
+        text, use_ai=use_ai, addressed=addressed, punish_soft_mat=strict)
     if level < 2:
         return False
 
@@ -112,16 +121,24 @@ async def handle(message: Message, bot: Bot) -> bool:
             "INSERT INTO warns (chat_id,user_id,admin_id,reason,ts) VALUES (?,?,?,?,?)",
             (message.chat.id, uid, 0, full_reason, int(time.time())))
 
+    ctx = await modlog.build_context(message.chat.id, uid, text)
+    await modlog.write(message.chat.id, pid, uid,
+                       message.from_user.first_name or str(uid),
+                       0, "автомодерация",
+                       "mute" if secs else "warn", reason, secs,
+                       "автомодерация", ctx)
+
     icon = "🔇" if secs else "⚠️"
     action = f"мут на <b>{human_period(secs)}</b>" if secs else "<b>предупреждение</b>"
     try:
-        await message.answer(
+        sent = await message.answer(
             f"🤖 <b>Автомодерация</b>\n\n"
             f"👤 {mention(message.from_user)}\n"
             f"📝 Причина: <b>{html.escape(reason)}</b>\n"
             f"{icon} Наказание: {action}\n"
             f"🔍 Обнаружено: {source}\n"
             f"<code>#{pid}</code>")
+        modlog.schedule_autodelete(bot, sent)
     except Exception:
         pass
     return True
@@ -236,3 +253,28 @@ async def cmd_violations(message: Message, bot: Bot, **kw):
             f"   {time.strftime('%d.%m %H:%M', time.localtime(r['ts']))} · "
             f"<code>#{r['id']}</code>")
     await message.reply("\n".join(lines)[:3800], disable_web_page_preview=True)
+
+
+@router.message(Cmd("автомут строгий", "строгий мат", section=S, rank=4,
+                    usage="автомут строгий вкл|выкл",
+                    desc="Наказывать мат даже без адресата"))
+async def cmd_strict(message: Message, bot: Bot, args: str = "", **kw):
+    if not await require(message, bot, 4):
+        return
+    a = (args or "").strip().lower()
+    if a in {"вкл", "on", "да"}:
+        await db.set_setting(message.chat.id, "automod_strict", "1")
+        return await message.reply(
+            "🔴 <b>Строгий режим включён</b>\n\n"
+            "Теперь наказывается любой мат, даже «бля» без адресата.")
+    if a in {"выкл", "off", "нет"}:
+        await db.set_setting(message.chat.id, "automod_strict", "0")
+        return await message.reply(
+            "🟢 <b>Строгий режим выключен</b>\n\n"
+            "Мат-междометия («бля», «пиздец», «заебался») не наказываются.\n"
+            "Наказывается только мат в адрес человека.")
+    cur = await db.get_setting(message.chat.id, "automod_strict", "0")
+    await message.reply(
+        f"Строгий режим: <b>{'включён' if cur == '1' else 'выключен'}</b>\n\n"
+        f"<i>Выключен — «бля» и «пиздец» без адресата пропускаются.</i>\n"
+        f"Изменить: <code>автомут строгий вкл</code>")

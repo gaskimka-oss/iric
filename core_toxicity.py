@@ -195,6 +195,95 @@ def _has_root(variants: list[str], roots: list[str],
     return None
 
 
+# ── адресность: направлено ли на человека ────────────────────────────
+_ADDRESS = [
+    "ты", "тебе", "тебя", "тобой", "твой", "твоя", "твое", "твои", "твою",
+    "вы", "вам", "вас", "ваш", "ваша", "ваше", "ваши",
+    "он", "она", "его", "ее", "ей", "им", "их", "этот", "эта", "эти",
+    "иди", "идите", "пошел", "пошла", "пошли", "вали", "свали",
+    "заткнись", "замолчи", "молчи", "сдохни", "убейся", "сам",
+]
+
+# междометия — мат «в воздух», без адресата
+_INTERJECTION = [
+    "бля", "блядь", "блят", "блин", "пиздец", "пипец", "капец",
+    "ебать", "ебал", "ёбана", "ебана", "офигеть", "охренеть", "охуеть",
+    "жесть", "ужас", "кошмар", "ну", "ой", "ай", "эх", "фух", "хм",
+]
+
+
+def _only_interjection(raw: str) -> bool:
+    """Сообщение — просто эмоция без обращения («бля», «ну пиздец»)."""
+    low = raw.lower().replace("ё", "е")
+    words = [w for w in re.split(r"[^а-яa-z]+", low) if w]
+    if not words or len(words) > 7:
+        return False
+    # все слова — междометия или мусорные частицы
+    filler = {"как","же","так","это","всё","все","что","вообще","опять",
+              "уже","прям","совсем","блин","да","нет","и","а","но","ну"}
+    for w in words:
+        if w in filler:
+            continue
+        if any(w.startswith(normalize(i)) for i in _INTERJECTION):
+            continue
+        return False
+    return True
+
+
+# мат о себе или о ситуации, а не о человеке
+_SELF = ["я ", "мне ", "меня ", "мной ", "мой ", "моя ", "мое ", "мои ",
+         "нам ", "нас ", "мы ", "себя ", "устал", "задолбал", "achieved"]
+_ABOUT_THING = ["эту", "этот", "это", "эта", "работу", "работа", "погод",
+                "ситуац", "жизнь", "день", "неделю", "игру", "комп",
+                "интернет", "телефон", "всё это", "все это"]
+
+# оценка ситуации: «хуево получилось», «пиздато вышло»
+_EVAL_ADV = ["хуев", "хуёв", "пиздат", "заебис", "охуенн", "ахуенн",
+             "херов", "погано", "хреново"]
+_EVAL_VERB = ["получил", "вышло", "выходит", "сделал", "здела", "прошло",
+              "работает", "получается", "звучит", "смотрится", "идет", "идёт"]
+
+
+def _about_self_or_thing(raw: str) -> bool:
+    """«заебался», «ебать я устал», «нахуй эту работу» — не про человека."""
+    low = " " + raw.lower().replace("ё", "е") + " "
+    # явное указание на себя
+    for w in _SELF:
+        if f" {w}" in low:
+            return True
+    # мат в адрес предмета/ситуации
+    for w in _ABOUT_THING:
+        if w in low:
+            return True
+    # возвратные глаголы: заебался, задолбался, охренел
+    import re as _re
+    if _re.search(r"\b\w*(ался|алась|ались)\b", low):
+        return True
+    # оценка ситуации: «хуево получилось»
+    if any(a in low for a in _EVAL_ADV) and any(v in low for v in _EVAL_VERB):
+        return True
+    # одиночное оценочное наречие без адресата: «хуево», «пиздато»
+    words = [w for w in _re.split(r"[^а-яa-z]+", low) if w]
+    if len(words) <= 2 and words and any(
+            words[0].startswith(a) for a in _EVAL_ADV):
+        return True
+    return False
+
+
+def _is_addressed(raw: str, has_reply: bool = False, has_mention: bool = False) -> bool:
+    """Направлено ли сообщение на конкретного человека."""
+    # чистая эмоция — даже реплаем это не оскорбление
+    if _only_interjection(raw):
+        return False
+    if has_reply or has_mention:
+        return True
+    low = " " + raw.lower().replace("ё", "е") + " "
+    for w in _ADDRESS:
+        if f" {w} " in low or low.startswith(w + " "):
+            return True
+    return "@" in raw
+
+
 def local_check(text: str) -> tuple[int, str]:
     """-> (уровень 0..3, причина).
 
@@ -288,9 +377,22 @@ def ai_check(text: str, timeout: int = 8) -> tuple[int, str] | None:
         return None
 
 
-async def check(text: str, use_ai: bool = True) -> tuple[int, str, str]:
-    """-> (уровень, причина, источник). Сначала словарь, потом ИИ."""
+async def check(text: str, use_ai: bool = True, addressed: bool = False,
+                punish_soft_mat: bool = False) -> tuple[int, str, str]:
+    """-> (уровень, причина, источник).
+
+    addressed — сообщение адресовано человеку (реплай/@ник/«ты…»).
+    punish_soft_mat — наказывать мат-междометия без адресата.
+    """
     lvl, reason = local_check(text)
+
+    # мат «в воздух» без адресата — не наказываем (если не включено строго)
+    if lvl == 3 and reason == "нецензурная брань" and not punish_soft_mat:
+        if _only_interjection(text) or _about_self_or_thing(text):
+            return 0, "", "словарь"
+        if not (addressed or _is_addressed(text)):
+            return 0, "", "словарь"
+
     if lvl >= 2:
         return lvl, reason, "словарь"
 

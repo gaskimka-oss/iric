@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -12,7 +13,9 @@ from pathlib import Path
 from core_registry import (RANK_NAMES, SECTION_EMOJI, SECTIONS, registry_by_section)
 
 API = "https://api.telegra.ph/"
-STATE = Path(__file__).resolve().parent / "data" / "telegraph.json"
+DATA_DIR = Path(os.getenv("DATA_DIR",
+                          str(Path(__file__).resolve().parent / "data")))
+STATE = DATA_DIR / "telegraph.json"
 
 
 def _api(method: str, **params) -> dict:
@@ -38,7 +41,7 @@ SECTION_IMG = {
 
 
 def _images() -> dict:
-    f = Path(__file__).resolve().parent.parent / "data" / "images.json"
+    f = STATE.parent / "images.json"
     if f.exists():
         try:
             return json.loads(f.read_text())

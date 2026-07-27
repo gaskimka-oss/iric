@@ -19,10 +19,12 @@ def _int_list(raw: str) -> list[int]:
 
 # --- Основное -------------------------------------------------------------
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "").strip()
-OWNER_ID: int = int(os.getenv("OWNER_ID", "0") or 0)
+DEFAULT_OWNER = 8412527198          # ID владельца по умолчанию
+OWNER_ID: int = int(os.getenv("OWNER_ID", "") or DEFAULT_OWNER)
 ADMINS: list[int] = list({OWNER_ID, *_int_list(os.getenv("ADMINS", ""))} - {0})
 
-DB_PATH: Path = Path(os.getenv("DB_PATH", BASE_DIR / "data" / "iris.db"))
+DATA_DIR: Path = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
+DB_PATH: Path = Path(os.getenv("DB_PATH", DATA_DIR / "iris.db"))
 
 # --- Экономика ------------------------------------------------------------
 CURRENCY = os.getenv("CURRENCY", "🪙")          # символ валюты
@@ -67,9 +69,4 @@ def validate() -> None:
             "Токен берётся у @BotFather."
         )
     if not OWNER_ID:
-        raise SystemExit(
-            "❌ OWNER_ID не задан.\n"
-            "• Локально: впишите OWNER_ID=... в .env\n"
-            "• На хостинге: добавьте переменную окружения OWNER_ID\n"
-            "Свой ID узнайте у @userinfobot."
-        )
+        print("⚠️  OWNER_ID не задан — команды владельца будут недоступны.")

@@ -14,6 +14,7 @@ from aiogram.types import ChatPermissions, Message
 
 import db
 from config import WARN_LIMIT, WARN_MUTE_HOURS
+import core_modlog as modlog
 from core_punish import (KIND_NAMES, check_reason, explain_error, guard_target,
                          lift_punish, log_punish, render_history, render_list,
                          strip_forever)
@@ -65,13 +66,18 @@ async def cmd_mute(message: Message, bot: Bot, args: str = "", **kw):
         "ON CONFLICT(chat_id,user_id) DO UPDATE SET reason=excluded.reason, until=excluded.until",
         (message.chat.id, uid, reason, message.from_user.id if message.from_user else 0,
          int(time.time()) + secs if secs else 0, int(time.time())))
-    await message.reply(
+    ctx = await modlog.build_context(message.chat.id, uid)
+    await modlog.write(message.chat.id, pid, uid, name,
+                       message.from_user.id, message.from_user.first_name,
+                       "mute", reason, secs, "админ", ctx)
+    sent = await message.reply(
         f"🔇 <b>Мут выдан</b>\n"
         f"👤 {mention_id(uid, name)}\n"
         f"⏱ Срок: <b>{human_period(secs)}</b>\n"
         f"📝 Причина: {html.escape(reason)}\n"
         f"👮 Модератор: {mention_id(message.from_user.id, message.from_user.first_name)}\n"
         f"<code>#{pid}</code>")
+    modlog.schedule_autodelete(bot, sent)
 
 
 @router.message(Cmd("размут", "размутить", "unmute", section=S_BAN, rank=1,
@@ -128,13 +134,18 @@ async def cmd_ban(message: Message, bot: Bot, args: str = "", **kw):
         "ON CONFLICT(chat_id,user_id) DO UPDATE SET reason=excluded.reason, until=excluded.until",
         (message.chat.id, uid, reason, message.from_user.id if message.from_user else 0,
          int(time.time()) + secs if secs else 0, int(time.time())))
-    await message.reply(
+    ctx = await modlog.build_context(message.chat.id, uid)
+    await modlog.write(message.chat.id, pid, uid, name,
+                       message.from_user.id, message.from_user.first_name,
+                       "ban", reason, secs, "админ", ctx)
+    sent = await message.reply(
         f"🔨 <b>Бан выдан</b>\n"
         f"👤 {mention_id(uid, name)}\n"
         f"⏱ Срок: <b>{human_period(secs)}</b>\n"
         f"📝 Причина: {html.escape(reason)}\n"
         f"👮 Модератор: {mention_id(message.from_user.id, message.from_user.first_name)}\n"
         f"<code>#{pid}</code>")
+    modlog.schedule_autodelete(bot, sent)
 
 
 @router.message(Cmd("разбан", "разбанить", "unban", section=S_BAN, rank=2,
@@ -178,8 +189,13 @@ async def cmd_kick(message: Message, bot: Bot, args: str = "", **kw):
     except Exception as e:
         return await message.reply(explain_error(e, "кикнуть"))
     pid = await log_punish(message.chat.id, uid, "kick", rest, 0, message.from_user.id)
-    await message.reply(f"👢 <b>Исключён</b>\n👤 {mention_id(uid, name)}\n"
-                        f"📝 Причина: {html.escape(rest)}\n<code>#{pid}</code>")
+    ctx = await modlog.build_context(message.chat.id, uid)
+    await modlog.write(message.chat.id, pid, uid, name,
+                       message.from_user.id, message.from_user.first_name,
+                       "kick", rest, 0, "админ", ctx)
+    sent = await message.reply(f"👢 <b>Исключён</b>\n👤 {mention_id(uid, name)}\n"
+                               f"📝 Причина: {html.escape(rest)}\n<code>#{pid}</code>")
+    modlog.schedule_autodelete(bot, sent)
 
 
 # ---------------- ПРЕДУПРЕЖДЕНИЯ ----------------
@@ -217,7 +233,12 @@ async def cmd_warn(message: Message, bot: Bot, args: str = "", **kw):
             else:
                 text += "\n\n<i>(не хватило прав для автомута)</i>"
         await db.execute("DELETE FROM warns WHERE chat_id=? AND user_id=?", (message.chat.id, uid))
-    await message.reply(text)
+    ctx = await modlog.build_context(message.chat.id, uid)
+    await modlog.write(message.chat.id, pid, uid, name,
+                       message.from_user.id, message.from_user.first_name,
+                       "warn", rest, 0, "админ", ctx)
+    sent = await message.reply(text)
+    modlog.schedule_autodelete(bot, sent)
 
 
 @router.message(Cmd("снять варн", "снять пред", "минус варн", "unwarn", section=S_BAN, rank=1,

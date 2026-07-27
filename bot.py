@@ -32,6 +32,7 @@ import h_botinfo as botinfo
 import h_callall as callall
 import h_grams as grams
 import h_automod as automod
+import h_adminpanel as adminpanel
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
@@ -116,6 +117,7 @@ async def main() -> None:
               userinfo.router):
         r.message.middleware(access_middleware)
 
+    dp.include_router(adminpanel.router)
     dp.include_router(start.router)
     dp.include_router(helpmenu.router)
     dp.include_router(dk.router)

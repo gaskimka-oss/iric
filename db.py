@@ -139,6 +139,24 @@ CREATE TABLE IF NOT EXISTS purchases (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item TEXT,
     stars INTEGER, amount INTEGER, ts INTEGER);
 
+CREATE TABLE IF NOT EXISTS mod_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL, punish_id INTEGER,
+    target_id INTEGER, target_name TEXT,
+    by_id INTEGER, by_name TEXT,
+    kind TEXT, reason TEXT, seconds INTEGER DEFAULT 0,
+    context TEXT,              -- переписка вокруг нарушения
+    source TEXT,               -- 'админ' | 'автомодерация'
+    reviewed INTEGER NOT NULL DEFAULT 0,
+    ts INTEGER);
+CREATE INDEX IF NOT EXISTS idx_modlog_chat ON mod_log(chat_id, ts);
+
+CREATE TABLE IF NOT EXISTS msg_buffer (
+    chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL,
+    user_id INTEGER, user_name TEXT, text TEXT, ts INTEGER,
+    PRIMARY KEY (chat_id, msg_id));
+CREATE INDEX IF NOT EXISTS idx_buf ON msg_buffer(chat_id, ts);
+
 CREATE TABLE IF NOT EXISTS chat_schedule (
     chat_id INTEGER PRIMARY KEY,
     open_at TEXT, close_at TEXT,          -- 'HH:MM' или NULL

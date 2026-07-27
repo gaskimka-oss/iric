@@ -177,6 +177,13 @@ async def activity(message: Message, bot: Bot):
     uid = message.from_user.id
     text_raw = (message.text or message.caption or "").strip()
 
+    # --- буфер для контекста в логах модерации ---
+    try:
+        import core_modlog as _ml
+        await _ml.remember(message)
+    except Exception:
+        pass
+
     # --- автомодерация: оскорбления и мат ---
     try:
         from h_automod import handle as _automod
