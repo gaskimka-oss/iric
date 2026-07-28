@@ -22,10 +22,14 @@ BASE_DIR = Path(__file__).resolve().parent
 # Порядок важен: сначала пути, которые на хостингах обычно смонтированы
 # как постоянный диск, потом уже папка самого приложения.
 _ENV_KEYS = ("DB_DIR", "STORAGE_DIR", "PERSIST_DIR", "VOLUME_PATH", "DATA_DIR")
+# Порядок важен — первым идёт то, что реально монтируется хостингом.
+# У Bothost постоянное хранилище это /app/data: папка исключена из Git
+# и переживает пересборку контейнера (подтверждено их документацией).
 _FIXED = (
+    "/app/data",
     "/data", "/storage", "/persist", "/persistent",
     "/mnt/data", "/mnt/storage", "/mnt/volume", "/var/data",
-    "/app/data", "/app/storage", "/home/data",
+    "/app/storage", "/home/data",
 )
 
 
@@ -96,8 +100,9 @@ def _score(p: Path, mk: dict) -> tuple:
     has_db = 1 if db.exists() and db.stat().st_size > 0 else 0
     survived = 1 if mk.get("boots", 0) >= 1 else 0
     boots = int(mk.get("boots", 0))
-    outside_app = 0 if str(p).startswith(str(BASE_DIR)) else 1
-    return (survived, boots, has_db, outside_app)
+    # /app/data — штатное постоянное хранилище Bothost, ему приоритет
+    preferred = 1 if str(p) in ("/app/data", os.getenv("DATA_DIR", "")) else 0
+    return (survived, boots, has_db, preferred)
 
 
 def choose() -> tuple[Path, dict]:

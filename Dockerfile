@@ -8,15 +8,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Каталоги для базы. Если хостинг умеет монтировать постоянный диск —
-# он подхватит один из них. Если нет, бот всё равно не потеряет данные:
-# копия базы уходит в Telegram и поднимается оттуда при старте.
-RUN mkdir -p /data /app/data
-VOLUME ["/data", "/app/data"]
+# Постоянное хранилище Bothost — это /app/data.
+# Папка исключена из синхронизации с Git и переживает пересборку.
+# ВАЖНО: объявлять VOLUME нельзя — это ломает bind mount хостинга.
+ENV DATA_DIR=/app/data
+RUN mkdir -p /app/data && chmod 777 /app/data
 
 ENV PYTHONUNBUFFERED=1
 
-# порт для healthcheck хостинга (бот отвечает 200 OK)
+# порт для проверки живости (бот читает PORT из окружения)
 EXPOSE 8080
 
 CMD ["python", "bot.py"]
