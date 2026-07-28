@@ -187,7 +187,8 @@ class Cmd(Filter):
                 if shadowed(name):
                     return False
                 return {"args": "", "cmd_name": name,
-                        "cmd_key": self.key, "cmd_rank": self.base_rank}
+                        "cmd_key": self.key, "cmd_rank": self.base_rank,
+                        "had_prefix": had_prefix}
             if low.startswith(name):
                 nxt = low[len(name):]
                 # следующий символ — разделитель (пробел/перенос), а не часть слова
@@ -196,7 +197,8 @@ class Cmd(Filter):
                         return False
                     return {"args": body[len(name):].lstrip(" ,:\n").strip(),
                             "cmd_name": name, "cmd_key": self.key,
-                            "cmd_rank": self.base_rank}
+                            "cmd_rank": self.base_rank,
+                            "had_prefix": had_prefix}
         return False
 
 

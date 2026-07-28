@@ -237,6 +237,24 @@ def cached() -> dict:
     return {}
 
 
+# Зеркало Telegraph. В Беларуси и ряде стран telegra.ph блокируют,
+# а graph.org — то же самое содержимое, но открывается.
+MIRROR = "graph.org"
+
+
+def mirror(url: str) -> str:
+    """Ссылка на зеркало — работает там, где telegra.ph закрыт."""
+    return (url or "").replace("telegra.ph", MIRROR)
+
+
+def both_links(url: str) -> str:
+    """HTML: основная ссылка + зеркало для заблокированных стран."""
+    if not url:
+        return ""
+    return (f'<a href="{url}">открыть</a> · '
+            f'<a href="{mirror(url)}">зеркало</a>')
+
+
 def section_url(num: int) -> str:
     st = cached()
     urls = st.get("urls") or ([st["url"]] if st.get("url") else [])
@@ -255,3 +273,8 @@ def section_url(num: int) -> str:
 def all_urls() -> list[str]:
     st = cached()
     return st.get("urls") or ([st["url"]] if st.get("url") else [])
+
+
+def all_mirrors() -> list[str]:
+    """Те же страницы, но на зеркале graph.org."""
+    return [mirror(u) for u in all_urls()]

@@ -29,8 +29,8 @@ async def _delete_later(bot: Bot, chat_id: int, ids: list[int], delay: int) -> N
             pass
 
 
-@router.message(Cmd("калл", "call", "общий сбор", "сбор", "созыв всех", "всех",
-                    "зов", section=S, rank=2, group_only=True,
+@router.message(Cmd("калл", "call", "общий сбор", "созыв всех",
+                    section=S, rank=2, group_only=True,
                     usage="калл {причина}",
                     desc="Созвать всех участников (удалится через 5 мин)"))
 async def cmd_call(message: Message, bot: Bot, args: str = "", **kw):

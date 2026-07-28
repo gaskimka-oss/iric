@@ -249,7 +249,8 @@ async def autokick(message: Message, bot: Bot, args: str = "", **kw):
     await message.reply(f"✅ Автокик неактивных: {human_period(secs)}")
 
 
-@router.message(Cmd("теги", "тег всех", "всем", section=S_CHAT, rank=2, usage="теги {текст}",
+@router.message(Cmd("тег всех", "тегнуть всех", "теги", section=S_CHAT, rank=2,
+                    need_prefix=True, usage="!теги {текст}",
                     desc="Тегнуть участников"))
 async def tag_all(message: Message, bot: Bot, args: str = "", **kw):
     if not await require(message, bot, 2):

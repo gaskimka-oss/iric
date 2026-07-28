@@ -60,9 +60,15 @@ def _menu_kb(page: int = 0) -> InlineKeyboardMarkup:
     rows.append(nav)
     urls = docs.all_urls()
     if len(urls) == 1:
-        rows.append([InlineKeyboardButton(text="🌐 Вся справка", url=urls[0])])
+        rows.append([InlineKeyboardButton(text="🌐 Вся справка", url=urls[0]),
+                     InlineKeyboardButton(text="🪞 Зеркало",
+                                          url=docs.mirror(urls[0]))])
     elif urls:
         rows.append([InlineKeyboardButton(text=f"🌐 Справка ч.{i+1}", url=u)
+                     for i, u in enumerate(urls[:3])])
+        # зеркало для стран, где telegra.ph заблокирован (Беларусь и др.)
+        rows.append([InlineKeyboardButton(text=f"🪞 Зеркало ч.{i+1}",
+                                          url=docs.mirror(u))
                      for i, u in enumerate(urls[:3])])
     from core_nav import with_home
     return with_home(InlineKeyboardMarkup(inline_keyboard=rows))
@@ -225,8 +231,10 @@ async def cb_help(call: CallbackQuery):
                     text="▶️", callback_data=f"h:s:{num}:{page}:{sub+1}"))
             rows.append(nav)
         if url:
-            rows.append([InlineKeyboardButton(
-                text="🔗 Открыть раздел в справке", url=url)])
+            rows.append([
+                InlineKeyboardButton(text="🔗 Раздел в справке", url=url),
+                InlineKeyboardButton(text="🪞 Зеркало",
+                                     url=docs.mirror(url))])
         from core_nav import with_home
         await _edit(call, pages[sub],
                     with_home(InlineKeyboardMarkup(inline_keyboard=rows),
@@ -268,7 +276,12 @@ async def cmd_docs(message: Message, **kw):
     if not urls:
         return await message.reply("Справка ещё не опубликована.")
     body = "\n".join(f"• Часть {i+1}: {u}" for i, u in enumerate(urls))
-    await message.reply(f"📖 <b>Полная справка по командам</b>\n{body}")
+    mirr = "\n".join(f"• Часть {i+1}: {docs.mirror(u)}"
+                     for i, u in enumerate(urls))
+    await message.reply(
+        f"📖 <b>Полная справка по командам</b>\n{body}\n\n"
+        f"🪞 <b>Если не открывается</b> (Беларусь и др.):\n{mirr}",
+        disable_web_page_preview=True)
 
 
 @router.message(Cmd("обновить справку", section=32, rank=5, usage="обновить справку",

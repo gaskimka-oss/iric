@@ -48,7 +48,8 @@ async def required_rank(chat_id: int, key: str, base: int) -> tuple[int, bool]:
     return base, True
 
 
-async def check(message, bot, key: str, base_rank: int) -> Optional[str]:
+async def check(message, bot, key: str, base_rank: int,
+                had_prefix: bool = True) -> Optional[str]:
     """None — можно выполнять. Иначе текст отказа ('' = молча проигнорировать)."""
     chat = message.chat
     if chat.type == "private":
@@ -85,6 +86,13 @@ async def check(message, bot, key: str, base_rank: int) -> Optional[str]:
     quiet = await db.get_setting(chat.id, "dk_silent", "0") == "1"
     if quiet:
         return ""
+
+    # Человек написал обычную фразу без префикса («всем привет»,
+    # «сбор в 5»), а она случайно совпала с командой. Ругаться на это
+    # нельзя — просто молчим, будто ничего не было.
+    if not had_prefix:
+        return ""
+
     return (f"⛔️ Недостаточно прав для этой команды.\n"
             f"Нужен ранг: <b>{rank_label(need)}</b>\n"
             f"Ваш ранг: <b>{rank_label(have) if have else 'Участник'}</b>")
@@ -131,7 +139,8 @@ async def access_middleware(handler, event, data: dict):
                     pass
             return
         bot = data.get("bot")
-        verdict = await check(event, bot, key, int(data.get("cmd_rank") or 0))
+        verdict = await check(event, bot, key, int(data.get("cmd_rank") or 0),
+                              bool(data.get("had_prefix", True)))
         if verdict is not None:
             if verdict:
                 try:

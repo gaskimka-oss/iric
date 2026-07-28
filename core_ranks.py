@@ -100,6 +100,15 @@ async def require(message: Message, bot: Bot, need: int, key: str = "") -> bool:
     r = await effective_rank(message, bot)
     if r >= need:
         return True
+
+    # Фраза без префикса случайно совпала с командой («всем привет») —
+    # молча пропускаем, ругаться на обычное сообщение нельзя.
+    text = (message.text or message.caption or "").strip()
+    if text and text[0] not in "!./":
+        low = text.lower()
+        if not (low.startswith("ирис") or low.startswith("ириска")):
+            return False
+
     await message.reply(
         f"⛔️ Недостаточно прав.\n"
         f"Нужен ранг: <b>{rank_label(need)}</b>\n"
