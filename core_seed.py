@@ -77,6 +77,53 @@ async def fix_topic_note() -> None:
                      val, r["chat_id"])
 
 
+# Чьё описание считать настоящим, если одна анкета оказалась у нескольких.
+# Ключ — user_id владельца анкеты. У остальных копия стирается.
+TRUE_OWNERS = {
+    6592023977,        # @L_I_ZAVETKA — «Лизавета Сергеевна»
+}
+
+
+async def wipe_duplicate_profiles() -> int:
+    """Стирает чужие копии одной и той же анкеты.
+
+    Из-за старого бага бот подставлял чужое описание другим людям,
+    и оно сохранялось им в профиль. Настоящий владелец определяется
+    по TRUE_OWNERS, а при равных условиях — по самой ранней записи.
+    """
+    from h_userinfo import FIELDS
+
+    rows = await db.fetchall("SELECT * FROM profiles")
+    groups: dict[tuple, list] = {}
+    for r in rows:
+        key = tuple((r[c] or "").strip().lower() for _, _, c in FIELDS)
+        if not any(key):
+            continue
+        groups.setdefault(key, []).append(r)
+
+    cols = ", ".join(f"{c}=NULL" for _, _, c in FIELDS)
+    wiped = 0
+    for key, people in groups.items():
+        if len(people) < 2:
+            continue
+        owner = next((p for p in people if p["user_id"] in TRUE_OWNERS), None)
+        if owner is None:
+            owner = min(people, key=lambda p: p["filled_ts"] or 0)
+        for p in people:
+            if p["user_id"] == owner["user_id"]:
+                continue
+            await db.execute(
+                f"UPDATE profiles SET {cols}, about=NULL, custom=NULL, "
+                f"custom_by=NULL, custom_ts=NULL, filled=0, filled_ts=NULL "
+                f"WHERE user_id=?", (p["user_id"],))
+            wiped += 1
+            log.info("Стёрта чужая копия анкеты у %s (владелец %s)",
+                     p["user_id"], owner["user_id"])
+    if wiped:
+        log.info("Всего стёрто чужих копий анкет: %d", wiped)
+    return wiped
+
+
 async def apply() -> None:
     now = int(time.time())
     added_s = added_st = 0
@@ -90,6 +137,11 @@ async def apply() -> None:
         await fix_topic_note()
     except Exception as e:
         log.warning("чистка подписи темы: %s", e)
+
+    try:
+        await wipe_duplicate_profiles()
+    except Exception as e:
+        log.warning("чистка дублей анкет: %s", e)
 
     for chat_id, kv in SETTINGS.items():
         for key, val in kv.items():

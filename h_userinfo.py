@@ -346,7 +346,17 @@ async def cmd_description(message: Message, bot: Bot, args: str = "", **kw):
     if a or real_reply(message) is not None:
         uid, name, _ = await resolve_target(message, a, bot)
         if not uid:
-            uid, name = me, message.from_user.first_name
+            # Человек указал @ник, но бот его не знает — он ещё ни разу
+            # не писал в чат. Раньше в этом случае молча показывалось
+            # СВОЁ описание (или чужое из реплая) — теперь честно говорим.
+            who = html.escape((name or a).lstrip("@")[:32])
+            return await message.reply(
+                f"🤔 Не знаю участника <b>@{who}</b>.\n\n"
+                f"Бот запоминает человека после его первого сообщения "
+                f"в чате. Попробуйте:\n"
+                f"• ответить на его сообщение командой <code>описание</code>\n"
+                f"• или указать его ID: <code>описание 123456789</code>",
+                disable_web_page_preview=True)
     else:
         uid, name = me, message.from_user.first_name
 
@@ -388,6 +398,86 @@ EXAMPLE = """☆ Имя: Дима
 ☆ семейное положение: свободен
 ☆ Айди: 51288077171
 ☆ Ник: ZRG Dima"""
+
+
+@router.message(Cmd("удалить описание", "снести описание", "очистить описание",
+                    "стереть описание", "сброс описания",
+                    section=S, rank=4, usage="удалить описание @ник",
+                    desc="Стереть описание участнику (ранг 4+)"))
+async def cmd_wipe_description(message: Message, bot: Bot, args: str = "", **kw):
+    """Полностью очищает анкету человека, чтобы он заполнил её заново."""
+    from core_ranks import require
+    if not await require(message, bot, 4):
+        return
+
+    a = (args or "").strip()
+    if not a and not real_reply(message):
+        return await message.reply(
+            "🧹 <b>Удалить описание участнику</b>\n\n"
+            "<code>удалить описание @ник</code>\n"
+            "или ответом на его сообщение.\n\n"
+            "Анкета очистится, человек заполнит заново.\n\n"
+            "Найти чужие копии одной анкеты:\n"
+            "<code>дубли описаний</code>")
+
+    uid, name, _ = await resolve_target(message, a, bot)
+    if not uid:
+        who = html.escape((name or a).lstrip("@")[:32])
+        return await message.reply(
+            f"🤔 Не знаю участника <b>@{who}</b>.\n"
+            f"Ответьте на его сообщение или укажите ID.")
+
+    cols = ", ".join(f"{c}=NULL" for _, _, c in FIELDS)
+    await _profile(uid)
+    await db.execute(
+        f"UPDATE profiles SET {cols}, about=NULL, custom=NULL, custom_by=NULL, "
+        f"custom_ts=NULL, filled=0, filled_ts=NULL WHERE user_id=?", (uid,))
+
+    await message.reply(
+        f"🧹 <b>Описание удалено</b>\n"
+        f"👤 {mention_id(uid, html.escape(name or str(uid)))}\n\n"
+        f"Человек заполнит анкету заново в теме описаний.")
+
+
+@router.message(Cmd("дубли описаний", "одинаковые описания", "проверить описания",
+                    "поиск дублей", section=S, rank=4,
+                    usage="дубли описаний",
+                    desc="Найти одинаковые анкеты у разных людей (ранг 4+)"))
+async def cmd_find_dupes(message: Message, bot: Bot, **kw):
+    """Ищет людей с одинаковыми анкетами — признак сбоя или списывания."""
+    from core_ranks import require
+    if not await require(message, bot, 4):
+        return
+
+    rows = await db.fetchall(
+        "SELECT p.*, u.username, u.first_name FROM profiles p "
+        "LEFT JOIN users u ON u.user_id=p.user_id")
+
+    groups: dict[tuple, list] = {}
+    for r in rows:
+        key = tuple((r[c] or "").strip().lower() for _, _, c in FIELDS)
+        if not any(key):
+            continue
+        groups.setdefault(key, []).append(r)
+
+    dupes = {k: v for k, v in groups.items() if len(v) > 1}
+    if not dupes:
+        return await message.reply(
+            "✅ <b>Дублей нет</b>\n\nУ каждого участника своя анкета.")
+
+    out = [f"⚠️ <b>Найдено групп с одинаковыми анкетами: {len(dupes)}</b>\n"]
+    for key, people in list(dupes.items())[:5]:
+        sample = next((v for v in key if v), "—")
+        out.append(f"📋 <b>«{html.escape(sample[:40])}…»</b> — {len(people)} чел.:")
+        for r in people:
+            nm = r["first_name"] or (f"@{r['username']}" if r["username"] else "")
+            out.append(f"   • {mention_id(r['user_id'], html.escape(nm or str(r['user_id'])))}"
+                       f" — <code>{r['user_id']}</code>")
+        out.append("")
+
+    out.append("<i>Кому анкета не принадлежит — сотрите:</i>")
+    out.append("<code>удалить описание @ник</code>")
+    await message.reply("\n".join(out), disable_web_page_preview=True)
 
 
 @router.message(Cmd("изменить описание", "редактировать описание",

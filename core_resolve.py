@@ -37,19 +37,29 @@ def real_reply(message: Message):
 
 
 async def resolve_target(message: Message, args: str, bot: Bot) -> tuple[Optional[int], Optional[str], str]:
-    """-> (user_id, имя, остаток_текста). Поддерживает реплай/@ник/ссылку/id."""
+    """-> (user_id, имя, остаток_текста). Поддерживает реплай/@ник/ссылку/id.
+
+    ВАЖЕН ПОРЯДОК: если человек явно указал @ник, ссылку или id —
+    берём именно его, даже когда команда отправлена ответом на чужое
+    сообщение. Раньше реплай побеждал, и «описание @Darkjd123» в ответ
+    на сообщение другого человека показывало чужую анкету.
+    """
     rest = args or ""
 
-    rep = real_reply(message)
-    if rep is not None:
-        u = rep.from_user
-        return u.id, u.first_name, rest.strip()
-
+    # 1) явное упоминание через кнопку/ссылку на профиль
     for ent in (message.entities or []):
         if ent.type == "text_mention" and ent.user:
             return ent.user.id, ent.user.first_name, rest.strip()
 
+    # 2) явно написанный @ник или ссылка t.me
     m = LINK_RE.search(rest) or USER_RE.search(rest)
+    if not m:
+        # 3) ничего явного нет — тогда смотрим на ответ
+        rep = real_reply(message)
+        if rep is not None:
+            u = rep.from_user
+            return u.id, u.first_name, rest.strip()
+
     if m:
         uname = m.group(1)
         rest = (rest[:m.start()] + rest[m.end():]).strip()
