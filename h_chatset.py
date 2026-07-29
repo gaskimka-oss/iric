@@ -45,17 +45,8 @@ async def form_set(message: Message, args: str = "", **kw):
                         "\nПример: <code>установить город Москва</code>")
 
 
-@router.message(Cmd("ник", "сменить ник", section=S_FORM, usage="ник {текст}",
-                    desc="Установить ник"))
-async def form_nick(message: Message, args: str = "", **kw):
-    nick = (args or "").strip()
-    if not nick:
-        return await message.reply("Формат: <code>ник Босс</code>")
-    if len(nick) > 32:
-        return await message.reply("Максимум 32 символа.")
-    await db.get_user(message.from_user.id)
-    await db.execute("UPDATE users SET nick=? WHERE user_id=?", (nick, message.from_user.id))
-    await message.reply(f"🏷 Ник установлен: <b>{html.escape(nick)}</b>")
+# Команды ников («ник», «+ник», «-ник», «никлист») живут в handlers/userinfo.py —
+# там они умеют брать ник из описания и синхронизировать его обратно.
 
 
 @router.message(Cmd("ид", "id", "айди", section=S_FORM, usage="ид {ссылка}",

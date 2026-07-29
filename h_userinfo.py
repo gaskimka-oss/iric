@@ -563,7 +563,7 @@ async def cmd_edit_description(message: Message, bot: Bot, args: str = "", **kw)
 
 
 @router.message(Cmd("+описание", "+ описание", "добавить описание",
-                    "новое описание", "изменить описание", "заполнить анкету",
+                    "новое описание", "заполнить анкету",
                     "+анкета", section=S, usage="+описание [текст анкеты]",
                     desc="Добавить или изменить своё описание"))
 async def cmd_add_description(message: Message, bot: Bot, args: str = "", **kw):
@@ -601,6 +601,24 @@ async def cmd_template(message: Message, bot: Bot, **kw):
         + where,
         disable_web_page_preview=True)
     _autodel(sent, 300)
+
+async def is_topping_up(uid: int, data: dict) -> bool:
+    """Человек дозаполняет уже начатую анкету одним-двумя полями.
+
+    Раньше бот требовал минимум два поля за раз, поэтому дописать
+    только «Айди» или только «Ник» было нельзя — сообщение просто
+    не принималось. Теперь если в профиле уже что-то есть, принимаем
+    даже одно поле.
+    """
+    if not data:
+        return False
+    p = await db.fetchone("SELECT * FROM profiles WHERE user_id=?", (uid,))
+    if not p:
+        return False
+    if p["filled"]:
+        return True
+    return sum(1 for _, _, c in FIELDS if p[c]) >= 1
+
 
 def looks_like_form(text: str) -> bool:
     """Похоже ли сообщение на описание о себе.
@@ -649,7 +667,6 @@ async def _save_form(message: Message, text: str) -> None:
             "📝 Не понял, где тут описание.\n\n"
             "Расскажите о себе — хотя бы 3 строки, "
             "или возьмите форму командой <code>шаблон</code>.")
-    uid = message.from_user.id
     await _profile(uid)
     sets = ", ".join(f"{c}=?" for c in data)
     await db.execute(f"UPDATE profiles SET {sets} WHERE user_id=?",
@@ -795,3 +812,160 @@ async def cmd_form_topic(message: Message, bot: Bot, args: str = "", **kw):
         f"Пока новичок не заполнит описание, он сможет писать "
         f"<b>только в этой теме</b>. В остальных его сообщения удаляются.",
         disable_web_page_preview=True)
+
+
+# ═══════════════ НИКИ ═══════════════
+async def get_nick(uid: int) -> str:
+    """Ник человека. Свой заданный важнее, иначе берём из описания."""
+    u = await db.get_user(uid)
+    if u["nick"]:
+        return str(u["nick"])
+    p = await _profile(uid)
+    return str(p["hobby"] or "")          # «Ник» из анкеты
+
+
+@router.message(Cmd("+ник", "+ ник", "поставить ник", "задать ник",
+                    "сменить ник", "изменить ник", "ник поставить",
+                    section=S, usage="+ник {текст}",
+                    desc="Поставить или сменить свой ник"))
+async def cmd_nick_set(message: Message, bot: Bot, args: str = "", **kw):
+    uid = message.from_user.id
+    nick = (args or "").strip()
+
+    if not nick:
+        cur = await get_nick(uid)
+        return await message.reply(
+            f"🏷 <b>Ваш ник:</b> {html.escape(cur) if cur else '<i>не задан</i>'}\n\n"
+            f"Поставить: <code>+ник ZRG Sofia</code>\n"
+            f"Убрать: <code>-ник</code>\n\n"
+            f"<i>Если ник не задан, он берётся из вашего описания.</i>")
+
+    if len(nick) > 32:
+        return await message.reply("🏷 Ник слишком длинный — не больше 32 символов.")
+
+    await db.get_user(uid)
+    await db.execute("UPDATE users SET nick=? WHERE user_id=?", (nick, uid))
+    await _profile(uid)
+    await db.execute("UPDATE profiles SET hobby=? WHERE user_id=?", (nick, uid))
+    await message.reply(f"🏷 <b>Ник установлен:</b> {html.escape(nick)}")
+
+
+@router.message(Cmd("-ник", "- ник", "убрать ник", "снять ник", "удалить ник",
+                    section=S, usage="-ник", desc="Убрать свой ник"))
+async def cmd_nick_off(message: Message, bot: Bot, args: str = "", **kw):
+    uid = message.from_user.id
+    a = (args or "").strip()
+
+    # админ может снять ник другому
+    if a or real_reply(message):
+        from core_ranks import effective_rank
+        if await effective_rank(message, bot) >= 4:
+            tid, tname, _ = await resolve_target(message, a, bot)
+            if tid:
+                await db.execute("UPDATE users SET nick=NULL WHERE user_id=?", (tid,))
+                await db.execute("UPDATE profiles SET hobby=NULL WHERE user_id=?", (tid,))
+                return await message.reply(
+                    f"🏷 Ник снят у {mention_id(tid, html.escape(tname or str(tid)))}")
+
+    cur = await get_nick(uid)
+    if not cur:
+        return await message.reply("🏷 У вас и так нет ника.")
+    await db.execute("UPDATE users SET nick=NULL WHERE user_id=?", (uid,))
+    await db.execute("UPDATE profiles SET hobby=NULL WHERE user_id=?", (uid,))
+    await message.reply("🏷 Ник убран.")
+
+
+@router.message(Cmd("ник", "мой ник", "ники", section=S, usage="ник [@кого]",
+                    desc="Посмотреть свой или чужой ник"))
+async def cmd_nick_show(message: Message, bot: Bot, args: str = "", **kw):
+    a = (args or "").strip()
+    me = message.from_user.id
+
+    if a or real_reply(message):
+        uid, name, _ = await resolve_target(message, a, bot)
+        if not uid:
+            who = html.escape((name or a).lstrip("@")[:32])
+            return await message.reply(f"🤔 Не знаю участника <b>@{who}</b>.")
+    else:
+        uid, name = me, message.from_user.first_name
+
+    nick = await get_nick(uid)
+    who = mention_id(uid, html.escape(name or str(uid)))
+    if not nick:
+        tail = ("\n\nПоставить: <code>+ник ваш ник</code>" if uid == me else "")
+        return await message.reply(f"🏷 У {who} ник не задан.{tail}")
+    await message.reply(f"🏷 <b>Ник</b> {who}\n\n{html.escape(nick)}")
+
+
+@router.message(Cmd("никлист", "ник лист", "список ников", "все ники",
+                    section=S, rank=1, usage="никлист",
+                    desc="Кто поставил себе ник (ранг 1+)"))
+async def cmd_nick_list(message: Message, bot: Bot, args: str = "", **kw):
+    from core_ranks import require
+    if not await require(message, bot, 1):
+        return
+
+    rows = await db.fetchall(
+        "SELECT u.user_id, u.username, u.first_name, u.nick, p.hobby "
+        "FROM users u LEFT JOIN profiles p ON p.user_id=u.user_id "
+        "WHERE (u.nick IS NOT NULL AND u.nick<>'') "
+        "   OR (p.hobby IS NOT NULL AND p.hobby<>'') "
+        "ORDER BY u.user_id LIMIT 60")
+    total = await db.fetchone("SELECT COUNT(*) c FROM users")
+
+    if not rows:
+        return await message.reply(
+            "🏷 <b>Ники</b>\n\nПока никто не поставил ник.\n\n"
+            "Поставить: <code>+ник ваш ник</code>")
+
+    out = [f"🏷 <b>Ники — {len(rows)} из {total['c']} участников</b>\n"]
+    for r in rows:
+        nick = r["nick"] or r["hobby"]
+        nm = r["first_name"] or (f"@{r['username']}" if r["username"] else str(r["user_id"]))
+        out.append(f"• {mention_id(r['user_id'], html.escape(nm))} — "
+                   f"<b>{html.escape(str(nick)[:32])}</b>")
+    await message.reply("\n".join(out)[:3900], disable_web_page_preview=True)
+
+
+@router.message(Cmd("описаниялист", "описания лист", "список описаний",
+                    "кто заполнил", "лист описаний", section=S, rank=1,
+                    usage="описаниялист", desc="У кого есть описание (ранг 1+)"))
+async def cmd_desc_list(message: Message, bot: Bot, args: str = "", **kw):
+    from core_ranks import require
+    if not await require(message, bot, 1):
+        return
+
+    rows = await db.fetchall(
+        "SELECT p.*, u.username, u.first_name FROM profiles p "
+        "LEFT JOIN users u ON u.user_id=p.user_id")
+
+    done, empty = [], []
+    for r in rows:
+        has = bool(("custom" in r.keys() and r["custom"]) or r["filled"]
+                   or sum(1 for _, _, c in FIELDS if r[c]) >= MIN_FIELDS)
+        (done if has else empty).append(r)
+
+    def line(r):
+        nm = r["first_name"] or (f"@{r['username']}" if r["username"]
+                                 else str(r["user_id"]))
+        return f"• {mention_id(r['user_id'], html.escape(nm))}"
+
+    total = await db.fetchone("SELECT COUNT(*) c FROM users")
+    out = [f"📝 <b>Описания</b>\n",
+           f"✅ Заполнили: <b>{len(done)}</b>",
+           f"❌ Без описания: <b>{len(empty)}</b>",
+           f"👥 Всего в базе: <b>{total['c']}</b>\n"]
+
+    if done:
+        out.append("<b>✅ С описанием:</b>")
+        out += [line(r) for r in done[:30]]
+        if len(done) > 30:
+            out.append(f"<i>…и ещё {len(done) - 30}</i>")
+    if empty:
+        out.append("\n<b>❌ Без описания:</b>")
+        out += [line(r) for r in empty[:20]]
+        if len(empty) > 20:
+            out.append(f"<i>…и ещё {len(empty) - 20}</i>")
+
+    out.append("\n<i>Подробнее — админ-панель → 📝 Описания участников</i>")
+    await message.reply("\n".join(out)[:3900], disable_web_page_preview=True)

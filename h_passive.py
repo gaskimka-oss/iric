@@ -331,10 +331,18 @@ async def activity(message: Message, bot: Bot):
     # --- присланная анкета: сохраняем в любом чате ----------------------
     from h_userinfo import (LINE_RE as _LR, parse_form as _pf,
                                    _save_form as _sf, _split_lines as _sl,
-                                   looks_like_form as _lf)
+                                   looks_like_form as _lf,
+                                   is_topping_up as _top)
     _lines = _sl(text_raw)
-    if len(_lines) >= 2 and sum(1 for l in _lines if _LR.match(l.strip())) >= 2:
+    _hits = sum(1 for l in _lines if _LR.match(l.strip()))
+    if len(_lines) >= 2 and _hits >= 2:
         if _pf(text_raw):
+            await _sf(message, text_raw)
+            return
+    # дозаполнение начатой анкеты: «☆ Айди: 123» одной строкой
+    elif _hits >= 1:
+        _d = _pf(text_raw)
+        if _d and await _top(uid, _d):
             await _sf(message, text_raw)
             return
 
@@ -342,7 +350,8 @@ async def activity(message: Message, bot: Bot):
     if message.chat.type != "private":
         from h_userinfo import (LINE_RE, TEMPLATE, _save_form,
                                        _split_lines, get_form_topic,
-                                       looks_like_form, needs_form,
+                                       is_topping_up, looks_like_form,
+                                       needs_form, parse_form,
                                        topic_id, topic_link)
         if await needs_form(message.chat.id, uid):
             from core_ranks import effective_rank
@@ -353,8 +362,10 @@ async def activity(message: Message, bot: Bot):
                 _ft = await get_form_topic(message.chat.id)
                 if _ft and topic_id(message) == _ft:
                     _lines = _split_lines(text_raw)
-                    if (sum(1 for l in _lines if LINE_RE.match(l.strip())) >= 2
-                            or looks_like_form(text_raw)):
+                    _h = sum(1 for l in _lines if LINE_RE.match(l.strip()))
+                    if (_h >= 2 or looks_like_form(text_raw)
+                            or (_h >= 1 and await is_topping_up(
+                                uid, parse_form(text_raw)))):
                         await _save_form(message, text_raw)
                         return
                     try:
@@ -383,8 +394,11 @@ async def activity(message: Message, bot: Bot):
                 # анкету принимаем только в назначенной теме
                 lines = _split_lines(text_raw)
                 hits = sum(1 for l in lines if LINE_RE.match(l.strip()))
-                # в теме описаний принимаем и свободный рассказ о себе
-                if in_form_topic and (hits >= 2 or looks_like_form(text_raw)):
+                # в теме описаний принимаем свободный рассказ и дозаполнение
+                if in_form_topic and (
+                        hits >= 2 or looks_like_form(text_raw)
+                        or (hits >= 1 and await is_topping_up(
+                            uid, parse_form(text_raw)))):
                     await _save_form(message, text_raw)
                     return
 
