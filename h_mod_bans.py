@@ -18,7 +18,7 @@ import core_modlog as modlog
 from core_punish import (KIND_NAMES, check_reason, explain_error, guard_target,
                          lift_punish, log_punish, render_history, render_list,
                          strip_forever)
-from core_ranks import effective_rank, get_rank, rank_label, require
+from core_ranks import effective_rank, get_rank, rank_label, require, set_rank
 from core_registry import Cmd
 from core_resolve import human_period, parse_period, resolve_target
 from utils import mention_id
@@ -36,6 +36,11 @@ MUTE_ON = ChatPermissions(can_send_messages=True, can_send_audios=True,
                           can_send_videos=True, can_send_video_notes=True,
                           can_send_voice_notes=True, can_send_polls=True,
                           can_send_other_messages=True, can_add_web_page_previews=True)
+
+# Лимит предупреждений на текущей должности. После достижения человек
+# понижается на одну ступень, а счётчик для новой ступени начинается с нуля.
+RANK_WARN_LIMITS = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6}
+WARN_IMMUNE_FROM = 6
 
 
 # ---------------- МУТ ----------------
@@ -108,8 +113,8 @@ async def cmd_mutelist(message: Message, bot: Bot, **kw):
 
 # ---------------- БАН ----------------
 @router.message(Cmd("бан", "забанить", "ban", section=S_BAN, rank=2,
-                    usage="бан {ссылка} {время} {причина}",
-                    desc="Заблокировать (нужны срок и причина)"))
+                    usage="бан {ссылка} [время] {причина}",
+                    desc="Заблокировать; без срока — навсегда"))
 async def cmd_ban(message: Message, bot: Bot, args: str = "", **kw):
     uid, name, rest = await resolve_target(message, args, bot)
     err = await guard_target(message, bot, uid, "забанить")
@@ -119,7 +124,9 @@ async def cmd_ban(message: Message, bot: Bot, args: str = "", **kw):
     reason, forever = strip_forever(reason)
     if forever:
         secs = 0
-    if not await check_reason(message, "ban", reason, secs or (1 if forever else 0)):
+    # Для бана срок необязателен: «бан @user причина» означает навсегда.
+    # Причина по-прежнему обязательна.
+    if not await check_reason(message, "ban", reason, secs or 1):
         return
 
     until = (datetime.now(timezone.utc) + timedelta(seconds=secs)) if secs else None
@@ -209,30 +216,53 @@ async def cmd_warn(message: Message, bot: Bot, args: str = "", **kw):
     if not await check_reason(message, "warn", rest):
         return
 
+    target_rank = await get_rank(message.chat.id, uid)
+    if target_rank >= WARN_IMMUNE_FROM:
+        return await message.reply(
+            f"🛡 <b>{rank_label(target_rank)}</b> имеет иммунитет к варнам.\n"
+            "Техническим администраторам, заместителям и лидерам варны не выдаются.")
+
     await db.execute("INSERT INTO warns (chat_id,user_id,admin_id,reason,ts) VALUES (?,?,?,?,?)",
                      (message.chat.id, uid, message.from_user.id, rest, int(time.time())))
     pid = await log_punish(message.chat.id, uid, "warn", rest, 0, message.from_user.id)
     row = await db.fetchone("SELECT COUNT(*) c FROM warns WHERE chat_id=? AND user_id=?",
                             (message.chat.id, uid))
-    limit = int(await db.get_setting(message.chat.id, "warn_limit", str(WARN_LIMIT)))
+
+    # У персонала свой лимит для каждой ступени; у обычных игроков остаётся
+    # настраиваемый общий лимит с автомутом.
+    rank_limit = RANK_WARN_LIMITS.get(target_rank)
+    limit = rank_limit or int(await db.get_setting(
+        message.chat.id, "warn_limit", str(WARN_LIMIT)))
     text = (f"⚠️ <b>Предупреждение {row['c']}/{limit}</b>\n"
             f"👤 {mention_id(uid, name)}\n"
+            f"🎖 Статус: <b>{rank_label(target_rank) if target_rank else 'Игрок'}</b>\n"
             f"📝 Причина: {html.escape(rest)}\n"
             f"👮 {mention_id(message.from_user.id, message.from_user.first_name)}\n"
             f"<code>#{pid}</code>")
     if row["c"] >= limit:
-        until = datetime.now(timezone.utc) + timedelta(hours=WARN_MUTE_HOURS)
-        try:
-            await bot.restrict_chat_member(message.chat.id, uid, MUTE_OFF, until_date=until)
-            await log_punish(message.chat.id, uid, "mute",
-                             f"автомут: {limit} предупреждений", WARN_MUTE_HOURS * 3600, 0)
-            text += f"\n\n🔇 Лимит достигнут — автомут на {WARN_MUTE_HOURS} ч."
-        except Exception as e:
-            if "administrator" in str(e).lower():
-                text += "\n\n<i>(автомут не применён: пользователь — админ Telegram)</i>"
-            else:
-                text += "\n\n<i>(не хватило прав для автомута)</i>"
-        await db.execute("DELETE FROM warns WHERE chat_id=? AND user_id=?", (message.chat.id, uid))
+        if rank_limit:
+            new_rank = target_rank - 1
+            await set_rank(message.chat.id, uid, new_rank, message.from_user.id)
+            await db.execute("DELETE FROM warns WHERE chat_id=? AND user_id=?",
+                             (message.chat.id, uid))
+            new_label = rank_label(new_rank) if new_rank else "Игрок"
+            text += (f"\n\n⬇️ Лимит варнов для должности достигнут.\n"
+                     f"Понижен: <b>{rank_label(target_rank)}</b> → <b>{new_label}</b>.\n"
+                     "Счётчик варнов для новой ступени обнулён.")
+        else:
+            until = datetime.now(timezone.utc) + timedelta(hours=WARN_MUTE_HOURS)
+            try:
+                await bot.restrict_chat_member(message.chat.id, uid, MUTE_OFF, until_date=until)
+                await log_punish(message.chat.id, uid, "mute",
+                                 f"автомут: {limit} предупреждений", WARN_MUTE_HOURS * 3600, 0)
+                text += f"\n\n🔇 Лимит достигнут — автомут на {WARN_MUTE_HOURS} ч."
+            except Exception as e:
+                if "administrator" in str(e).lower():
+                    text += "\n\n<i>(автомут не применён: пользователь — админ Telegram)</i>"
+                else:
+                    text += "\n\n<i>(не хватило прав для автомута)</i>"
+            await db.execute("DELETE FROM warns WHERE chat_id=? AND user_id=?",
+                             (message.chat.id, uid))
     ctx = await modlog.build_context(message.chat.id, uid)
     await modlog.write(message.chat.id, pid, uid, name,
                        message.from_user.id, message.from_user.first_name,
@@ -281,12 +311,18 @@ async def cmd_warns(message: Message, bot: Bot, args: str = "", **kw):
     rows = await db.fetchall(
         "SELECT reason, ts, admin_id FROM warns WHERE chat_id=? AND user_id=? "
         "ORDER BY id DESC", (message.chat.id, uid))
-    limit = int(await db.get_setting(message.chat.id, "warn_limit", str(WARN_LIMIT)))
+    target_rank = await get_rank(message.chat.id, uid)
+    if target_rank >= WARN_IMMUNE_FROM:
+        return await message.reply(
+            f"🛡 {mention_id(uid, name)} — <b>{rank_label(target_rank)}</b>.\n"
+            "Для этой должности действует иммунитет к варнам.")
+    limit = RANK_WARN_LIMITS.get(target_rank) or int(await db.get_setting(
+        message.chat.id, "warn_limit", str(WARN_LIMIT)))
 
     if not rows:
         return await message.reply(
             f"✅ {'У вас' if own else f'У {mention_id(uid, name)}'} "
-            f"<b>нет предупреждений</b>.\nЛимит в чате: {limit}")
+            f"<b>нет предупреждений</b>.\nЛимит для текущего статуса: {limit}")
 
     left = limit - len(rows)
     head = (f"⚠️ <b>{'Ваши предупреждения' if own else 'Предупреждения'}</b>"

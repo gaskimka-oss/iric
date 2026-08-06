@@ -258,6 +258,19 @@ CREATE TABLE IF NOT EXISTS votes (
 CREATE TABLE IF NOT EXISTS vote_marks (
     vote_id INTEGER NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY (vote_id, user_id));
 
+-- Две связанные группы клана. Роли: admin и clan.
+CREATE TABLE IF NOT EXISTS clan_groups (
+    role TEXT PRIMARY KEY,
+    chat_id INTEGER NOT NULL UNIQUE,
+    title TEXT,
+    updated_by INTEGER,
+    ts INTEGER);
+
+-- Защита от повторной обработки двух Telegram-событий одного сквозного бана.
+CREATE TABLE IF NOT EXISTS clan_crossban_lock (
+    user_id INTEGER PRIMARY KEY,
+    ts INTEGER NOT NULL);
+
 CREATE INDEX IF NOT EXISTS idx_log_user ON log(user_id);
 CREATE INDEX IF NOT EXISTS idx_stats_chat ON chat_stats(chat_id);
 """

@@ -17,8 +17,8 @@ from utils import mention_id
 KIND_NAMES = {"mute": "мут", "ban": "бан", "warn": "предупреждение", "kick": "кик"}
 KIND_EMOJI = {"mute": "🔇", "ban": "🔨", "warn": "⚠️", "kick": "👢"}
 
-# Требуется ли срок для наказания
-NEEDS_TIME = {"mute", "ban"}
+# Срок обязателен только для мута. Бан без срока считается бессрочным.
+NEEDS_TIME = {"mute"}
 
 MIN_REASON_LEN = 3
 

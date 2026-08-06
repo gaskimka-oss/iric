@@ -44,17 +44,41 @@ async def get_rank(chat_id: int, user_id: int) -> int:
 
 
 async def set_rank(chat_id: int, user_id: int, rank: int, by: int = 0) -> None:
+    """Устанавливает ранг с учётом режима «глобальные ранги».
+
+    Раньше при снятии должности запись удалялась только в текущем чате, но
+    get_rank сразу возвращал старый ранг из второй группы. Поэтому визуально
+    админа было невозможно снять. В глобальном режиме меняем все его записи.
+    """
+    global_mode = await db.get_setting(chat_id, "global_ranks", "1") == "1"
+    now = int(time.time())
+
     if rank <= 0:
-        await db.execute("DELETE FROM ranks WHERE chat_id=? AND user_id=?", (chat_id, user_id))
+        if global_mode:
+            await db.execute("DELETE FROM ranks WHERE user_id=?", (user_id,))
+            await db.execute("DELETE FROM staff WHERE user_id=?", (user_id,))
+        else:
+            await db.execute("DELETE FROM ranks WHERE chat_id=? AND user_id=?",
+                             (chat_id, user_id))
+            await db.execute("DELETE FROM staff WHERE chat_id=? AND user_id=?",
+                             (chat_id, user_id))
     else:
+        if global_mode:
+            # Обновляем существующие назначения и импортированный состав, чтобы
+            # старший ранг из другой связанной группы не перекрывал понижение.
+            await db.execute(
+                "UPDATE ranks SET rank=?, granted_by=?, ts=? WHERE user_id=?",
+                (rank, by, now, user_id))
+            await db.execute("UPDATE staff SET rank=?, ts=? WHERE user_id=?",
+                             (rank, now, user_id))
         await db.execute(
             "INSERT INTO ranks (chat_id, user_id, rank, granted_by, ts) VALUES (?,?,?,?,?) "
             "ON CONFLICT(chat_id, user_id) DO UPDATE SET rank=excluded.rank, "
             "granted_by=excluded.granted_by, ts=excluded.ts",
-            (chat_id, user_id, rank, by, int(time.time())))
+            (chat_id, user_id, rank, by, now))
     await db.execute(
         "INSERT INTO rank_log (chat_id, user_id, rank, by_id, ts) VALUES (?,?,?,?,?)",
-        (chat_id, user_id, rank, by, int(time.time())))
+        (chat_id, user_id, rank, by, now))
 
 
 async def effective_rank(message: Message, bot: Bot) -> int:

@@ -67,6 +67,24 @@ async def resolve_target(message: Message, args: str, bot: Bot) -> tuple[Optiona
             "SELECT user_id, first_name FROM users WHERE lower(username)=lower(?)", (uname,))
         if row:
             return row["user_id"], row["first_name"], rest
+        # Человек мог выйти до команды, но остаться в импортированном составе.
+        # Если бот когда-либо видел его membership-событие, user_id уже привязан.
+        row = await db.fetchone(
+            "SELECT user_id, name FROM staff WHERE lower(username)=lower(?) "
+            "AND user_id IS NOT NULL AND user_id<>0 ORDER BY ts DESC LIMIT 1", (uname,))
+        if row:
+            return row["user_id"], row["name"] or uname, rest
+        # Telegram не разрешает искать обычного пользователя по @нику через
+        # Bot API, но список администраторов текущего чата доступен. Это чинит
+        # «снять @admin», даже если администратор ещё ничего не писал боту.
+        try:
+            for member in await bot.get_chat_administrators(message.chat.id):
+                user = member.user
+                if user.username and user.username.lower() == uname.lower():
+                    await db.touch_user(user.id, user.username, user.first_name)
+                    return user.id, user.first_name or uname, rest
+        except Exception:
+            pass
         try:
             chat = await bot.get_chat(f"@{uname}")
             await db.touch_user(chat.id, chat.username, chat.first_name or chat.title)

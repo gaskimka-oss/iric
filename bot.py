@@ -38,6 +38,7 @@ import h_callall as callall
 import h_grams as grams
 import h_automod as automod
 import h_adminpanel as adminpanel
+import core_clan_sync as clan_sync
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
@@ -198,6 +199,8 @@ async def main() -> None:
 
     dp.include_router(nav.router)
     dp.include_router(adminpanel.router)
+    # До passive: отслеживает выходы/кики и связывает две группы клана.
+    dp.include_router(clan_sync.router)
     dp.include_router(start.router)
     dp.include_router(helpmenu.router)
     dp.include_router(dk.router)
