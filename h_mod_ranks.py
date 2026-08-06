@@ -22,6 +22,65 @@ IN_CHAT, LEFT_CHAT = "🏐", "➖"
 
 
 USERNAME_OK = re.compile(r"^[A-Za-z0-9_]{4,32}$")
+USERNAME_IN_ARGS = re.compile(r"@([A-Za-z0-9_]{4,32})")
+
+
+async def _staff_by_written_username(chat_id: int, args: str):
+    """Ищет импортированного сотрудника, даже если Telegram ID ещё неизвестен.
+
+    Bot API не умеет преобразовывать произвольный @username пользователя в ID.
+    Но для понижения внутренней должности ID не нужен: достаточно записи staff.
+    """
+    match = USERNAME_IN_ARGS.search(args or "")
+    if not match:
+        return None
+    username = match.group(1)
+    row = await db.fetchone(
+        "SELECT chat_id,username,name,rank,user_id FROM staff "
+        "WHERE chat_id=? AND lower(username)=lower(?) LIMIT 1",
+        (chat_id, username))
+    if row:
+        return row
+    if await db.get_setting(chat_id, "global_ranks", "1") == "1":
+        return await db.fetchone(
+            "SELECT chat_id,username,name,rank,user_id FROM staff "
+            "WHERE lower(username)=lower(?) ORDER BY ts DESC LIMIT 1", (username,))
+    return None
+
+
+async def _change_unresolved_staff(message: Message, actor_rank: int, args: str,
+                                   *, remove: bool = False) -> bool:
+    """Понижает/снимает staff-запись по @нику, когда user_id неизвестен."""
+    row = await _staff_by_written_username(message.chat.id, args)
+    if not row:
+        return False
+    cur = int(row["rank"] or 0)
+    if cur >= MAX_RANK:
+        await message.reply(
+            f"👑 <b>{RANK_NAMES[MAX_RANK]}</b> неприкосновенен — его нельзя снять.")
+        return True
+    if cur >= actor_rank and actor_rank < MAX_RANK:
+        await message.reply("⛔️ Нельзя изменить должность равного или старшего.")
+        return True
+
+    global_mode = await db.get_setting(message.chat.id, "global_ranks", "1") == "1"
+    where = "lower(username)=lower(?)" if global_mode else \
+            "chat_id=? AND lower(username)=lower(?)"
+    params = (row["username"],) if global_mode else (message.chat.id, row["username"])
+    new_rank = 0 if remove else max(0, cur - 1)
+    if new_rank:
+        await db.execute(f"UPDATE staff SET rank=?, ts=? WHERE {where}",
+                         (new_rank, int(time.time()), *params))
+    else:
+        await db.execute(f"DELETE FROM staff WHERE {where}", params)
+
+    person = _link(row["username"], row["name"], int(row["user_id"] or 0))
+    if remove or not new_rank:
+        await message.reply(f"✅ {person} снят с должности.")
+    else:
+        await message.reply(
+            f"⬇️ {person} понижен до <b>{stars(new_rank)} {rank_name(new_rank)}</b>.")
+    return True
 
 
 def _link(username: str | None, name: str | None, user_id: int = 0) -> str:
@@ -145,7 +204,14 @@ async def cmd_demote(message: Message, bot: Bot, args: str = "", **kw):
         return await message.reply(f"⛔️ Недостаточно прав. Ваш ранг: <b>{rank_label(me)}</b>")
     uid, name, _ = await resolve_target(message, args, bot)
     if not uid:
-        return await message.reply("Укажите пользователя.")
+        # Импортированный состав может содержать только @username без Telegram
+        # ID. Для внутреннего понижения этого достаточно.
+        if await _change_unresolved_staff(message, me, args):
+            return
+        return await message.reply(
+            "Не удалось определить Telegram ID пользователя.\n"
+            "Ответьте командой на его сообщение или укажите числовой ID.\n"
+            "Если человек есть в импортированном составе, проверьте его @username.")
     cur = await get_rank(message.chat.id, uid)
     if cur <= 0:
         return await message.reply("У пользователя нет ранга.")
@@ -200,7 +266,11 @@ async def cmd_remove_rank(message: Message, bot: Bot, args: str = "", **kw):
         return await message.reply(f"⛔️ Недостаточно прав. Ваш ранг: <b>{rank_label(me)}</b>")
     uid, name, _ = await resolve_target(message, args, bot)
     if not uid:
-        return await message.reply("Укажите пользователя.")
+        if await _change_unresolved_staff(message, me, args, remove=True):
+            return
+        return await message.reply(
+            "Не удалось определить пользователя. Ответьте на его сообщение, "
+            "укажите числовой ID или проверьте @username в составе.")
     tgt = await get_rank(message.chat.id, uid)
     if tgt >= MAX_RANK:
         return await message.reply(
