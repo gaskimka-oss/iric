@@ -6,6 +6,7 @@ punishments и защищают Лидера клана (7 ранг) от люб
 from __future__ import annotations
 
 import html
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -41,6 +42,34 @@ MUTE_ON = ChatPermissions(can_send_messages=True, can_send_audios=True,
 # понижается на одну ступень, а счётчик для новой ступени начинается с нуля.
 RANK_WARN_LIMITS = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6}
 WARN_IMMUNE_FROM = 6
+USERNAME_RE = re.compile(r"@([A-Za-z0-9_]{4,32})")
+
+
+async def _queue_unknown_target(message: Message, args: str, kind: str) -> bool:
+    """Сохраняет мут/бан по нику до момента, когда станет известен user_id."""
+    match = USERNAME_RE.search(args or "")
+    if not match:
+        return False
+    username = match.group(1)
+    rest = ((args or "")[:match.start()] + (args or "")[match.end():]).strip()
+    seconds, reason = parse_period(rest)
+    reason, forever = strip_forever(reason)
+    if forever:
+        seconds = 0
+    reason = reason.strip() or "Без причины"
+    import core_pending_punish as pending
+    await pending.schedule(message.chat.id, username, kind, reason, seconds,
+                           message.from_user.id if message.from_user else 0)
+    action = "мут" if kind == "mute" else "бан"
+    await message.reply(
+        f"⏳ <b>{action.capitalize()} сохранён для @{html.escape(username)}</b>\n\n"
+        "Telegram пока не передал его числовой ID. Наказание автоматически "
+        "применится при его следующем сообщении, входе или событии участника.\n"
+        f"⏱ Срок: <b>{human_period(seconds)}</b>\n"
+        f"📝 Причина: {html.escape(reason)}\n\n"
+        "Для немедленного применения можно указать числовой ID или ответить "
+        "командой на сообщение пользователя.")
+    return True
 
 
 # ---------------- МУТ ----------------
@@ -49,6 +78,10 @@ WARN_IMMUNE_FROM = 6
                     desc="Запретить писать (нужны срок и причина)"))
 async def cmd_mute(message: Message, bot: Bot, args: str = "", **kw):
     uid, name, rest = await resolve_target(message, args, bot)
+    if not uid:
+        if await _queue_unknown_target(message, args, "mute"):
+            return
+        return await message.reply("Укажите пользователя: реплаем, @ником или id.")
     err = await guard_target(message, bot, uid, "замутить")
     if err:
         return await message.reply(err)
@@ -56,7 +89,9 @@ async def cmd_mute(message: Message, bot: Bot, args: str = "", **kw):
     reason, forever = strip_forever(reason)
     if forever:
         secs = 0
-    if not await check_reason(message, "mute", reason, secs or (1 if forever else 0)):
+    # Точная команда «мут @user» тоже работает: бессрочно, без причины.
+    reason = reason.strip() or "Без причины"
+    if not await check_reason(message, "mute", reason, secs or 1):
         return
 
     until = datetime.now(timezone.utc) + timedelta(seconds=secs or 366 * 86400)
@@ -117,6 +152,10 @@ async def cmd_mutelist(message: Message, bot: Bot, **kw):
                     desc="Заблокировать; без срока — навсегда"))
 async def cmd_ban(message: Message, bot: Bot, args: str = "", **kw):
     uid, name, rest = await resolve_target(message, args, bot)
+    if not uid:
+        if await _queue_unknown_target(message, args, "ban"):
+            return
+        return await message.reply("Укажите пользователя: реплаем, @ником или id.")
     err = await guard_target(message, bot, uid, "забанить")
     if err:
         return await message.reply(err)
@@ -124,8 +163,8 @@ async def cmd_ban(message: Message, bot: Bot, args: str = "", **kw):
     reason, forever = strip_forever(reason)
     if forever:
         secs = 0
-    # Для бана срок необязателен: «бан @user причина» означает навсегда.
-    # Причина по-прежнему обязательна.
+    # «бан @user» означает бессрочный бан с причиной по умолчанию.
+    reason = reason.strip() or "Без причины"
     if not await check_reason(message, "ban", reason, secs or 1):
         return
 

@@ -271,6 +271,19 @@ CREATE TABLE IF NOT EXISTS clan_crossban_lock (
     user_id INTEGER PRIMARY KEY,
     ts INTEGER NOT NULL);
 
+-- Отложенный мут/бан по @username. Нужен, потому что Bot API не умеет
+-- мгновенно преобразовывать неизвестный username обычного пользователя в ID.
+CREATE TABLE IF NOT EXISTS pending_punishments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    reason TEXT,
+    seconds INTEGER NOT NULL DEFAULT 0,
+    by_id INTEGER NOT NULL DEFAULT 0,
+    ts INTEGER NOT NULL,
+    UNIQUE(chat_id, username, kind));
+
 CREATE INDEX IF NOT EXISTS idx_log_user ON log(user_id);
 CREATE INDEX IF NOT EXISTS idx_stats_chat ON chat_stats(chat_id);
 """

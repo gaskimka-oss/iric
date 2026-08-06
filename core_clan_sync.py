@@ -174,6 +174,11 @@ async def on_member_changed(event: ChatMemberUpdated, bot: Bot):
     if not user or user.is_bot:
         return
     await db.touch_user(user.id, user.username, user.first_name)
+    try:
+        import core_pending_punish as pending
+        await pending.apply_for_user(bot, event.chat.id, user)
+    except Exception:
+        pass
 
     was_here = _is_present(event.old_chat_member)
     is_here = _is_present(event.new_chat_member)
