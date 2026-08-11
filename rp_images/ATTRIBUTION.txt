@@ -1,0 +1,2 @@
+Emoji graphics: Twemoji by Twitter contributors, licensed under CC-BY 4.0.
+https://github.com/jdecked/twemoji
