@@ -11,6 +11,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message)
 
 import db
+import core_members as members
 from config import (CRIME_COOLDOWN, CRIME_FINE, CRIME_REWARD, CRIME_SUCCESS_CHANCE,
                     DAILY_BONUS, DAILY_COOLDOWN, MAX_BET, MIN_BET, TRANSFER_FEE,
                     WORK_COOLDOWN, WORK_REWARD)
@@ -150,17 +151,24 @@ async def cmd_give_vip(message: Message, bot: Bot, args: str = "", **kw):
 
 
 # ---------- 14. Развлечения ----------
-@router.message(Cmd("кто", section=S_FUN, usage="кто {вопрос}", desc="Случайный участник"))
-async def cmd_who(message: Message, args: str = "", **kw):
+@router.message(Cmd("кто", section=S_FUN, usage="!кто {вопрос}",
+                    desc="Случайный присутствующий участник (только с обращением)"))
+async def cmd_who(message: Message, bot: Bot, args: str = "", **kw):
+    """Отвечает только на явную команду; обычное «кто играть?» игнорируется."""
     q = html.escape(args) if args else "самый крутой"
     if message.chat.type == "private":
         return await message.reply(f"🤔 Кто {q}? Конечно ты!")
-    rows = await db.fetchall(
-        "SELECT s.user_id, u.first_name FROM chat_stats s LEFT JOIN users u "
-        "ON u.user_id=s.user_id WHERE s.chat_id=? ORDER BY RANDOM() LIMIT 1", (message.chat.id,))
-    if not rows:
-        return await message.reply("Пока не знаю участников — поговорите немного.")
-    await message.reply(f"🤔 {q} — это {mention_id(rows[0]['user_id'], rows[0]['first_name'])}!")
+
+    rows = await members.known_chat_rows(message.chat.id, limit=100)
+    me = await bot.me()
+    people = await members.verified_members(
+        bot, message.chat.id, rows, exclude=(me.id,))
+    if not people:
+        return await message.reply("Не нашёл присутствующих участников.")
+    person = random.choice(people)
+    who = members.summon_mention(
+        person["user_id"], person.get("first_name"), person.get("username"))
+    await message.reply(f"🤔 {q} — это {who}!")
 
 
 @router.message(Cmd("шанс", "вероятность", section=S_FUN, usage="шанс {вопрос}",

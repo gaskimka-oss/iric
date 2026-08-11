@@ -16,6 +16,19 @@ from aiogram.types import Message
 PREFIX_CHARS = "!./"
 PREFIX_WORDS = ("ириска", "ирис")
 
+# Эти слова часто начинают обычные реплики, обращённые к людям. Без явного
+# обращения бот обязан молчать. Команды остаются доступны через !, .,
+# / или «Ирис ...». Это устраняет ответы на фразы вроде «кто играть?»,
+# «выбери карту», «спасибо», «дай/дать ссылку».
+EXPLICIT_ADDRESS_NAMES = {
+    "кто", "шанс", "вероятность", "выбери", "выбор", "шар", "8ball",
+    "рандом", "случайное число", "монетка", "монета", "правда", "действие",
+    "правда или действие", "анекдот", "шутка", "погода",
+    "кто я", "я кто", "кто йа", "кто ты", "ты кто", "кто это",
+    # Слишком разговорные алиасы других команд.
+    "дать", "спасибо", "плюс", "сохранить", "напомни",
+}
+
 SECTIONS: dict[int, str] = {
     1: "Команды модерации",
     2: "Система банов и предупреждений",
@@ -169,6 +182,10 @@ class Cmd(Filter):
             return False
 
         low = _norm(body)
+        in_group = getattr(message.chat, "type", "") in {"group", "supergroup"}
+        replied = getattr(message, "reply_to_message", None)
+        reply_user = getattr(replied, "from_user", None)
+        addressed = had_prefix or bool(reply_user and getattr(reply_user, "is_bot", False))
 
         def shadowed(matched: str) -> bool:
             """Есть ли более длинная команда, которая тоже подходит под текст.
@@ -184,6 +201,8 @@ class Cmd(Filter):
 
         for name in self.names:
             if low == name:
+                if in_group and not addressed and name in EXPLICIT_ADDRESS_NAMES:
+                    return False
                 if shadowed(name):
                     return False
                 return {"args": "", "cmd_name": name,
@@ -193,6 +212,8 @@ class Cmd(Filter):
                 nxt = low[len(name):]
                 # следующий символ — разделитель (пробел/перенос), а не часть слова
                 if nxt[:1] in (" ", "\n", ",", ":"):
+                    if in_group and not addressed and name in EXPLICIT_ADDRESS_NAMES:
+                        return False
                     if shadowed(name):
                         return False
                     return {"args": body[len(name):].lstrip(" ,:\n").strip(),
