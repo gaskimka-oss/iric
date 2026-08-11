@@ -79,6 +79,14 @@ async def user_middleware(handler, event, data: dict):
         await db.touch_user(user.id, user.username, user.first_name)
     chat = getattr(event, "chat", None)
     if chat is not None and chat.type in {"group", "supergroup"}:
+        # Любое сообщение/нажатие в группе подтверждает, что пользователь
+        # сейчас в чате. События выхода отдельно запишет core_clan_sync.
+        if user and not user.is_bot:
+            try:
+                import core_members as _members
+                await _members.remember_member(chat.id, user.id, "member", True)
+            except Exception:
+                pass
         # Если мут/бан был задан по ещё неизвестному @username, применяем его
         # сразу, как только Telegram прислал событие с настоящим user_id.
         if user and not user.is_bot:

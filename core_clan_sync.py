@@ -133,6 +133,11 @@ async def _cross_ban(bot: Bot, user_id: int, user_name: str, source_chat: int,
         try:
             await bot.ban_chat_member(chat_id, user_id)
             successes.append(chat_id)
+            try:
+                import core_members
+                await core_members.remember_member(chat_id, user_id, "kicked", False)
+            except Exception:
+                pass
             await db.execute(
                 "INSERT INTO bans(chat_id,user_id,reason,by_id,until,ts) VALUES (?,?,?,?,0,?) "
                 "ON CONFLICT(chat_id,user_id) DO UPDATE SET reason=excluded.reason, "
@@ -174,14 +179,20 @@ async def on_member_changed(event: ChatMemberUpdated, bot: Bot):
     if not user or user.is_bot:
         return
     await db.touch_user(user.id, user.username, user.first_name)
+    was_here = _is_present(event.old_chat_member)
+    is_here = _is_present(event.new_chat_member)
+    try:
+        import core_members
+        await core_members.remember_member(
+            event.chat.id, user.id, _status(event.new_chat_member), is_here)
+    except Exception:
+        pass
     try:
         import core_pending_punish as pending
         await pending.apply_for_user(bot, event.chat.id, user)
     except Exception:
         pass
 
-    was_here = _is_present(event.old_chat_member)
-    is_here = _is_present(event.new_chat_member)
     if not was_here or is_here:
         return
 

@@ -353,9 +353,12 @@ async def cmd_ai(message: Message, bot: Bot, args: str = "", **kw):
                  2: "🟠 оскорбление", 3: "🔴 мат/травля"}
         extra = (f"\n👤 Зачинщик: {html.escape(res['instigator'])}"
                  if res.get("instigator") else "")
+        category = (f"\n📌 Правило: {html.escape(res['category'])}"
+                    if res.get("category") else "")
         return await m.edit_text(
-            f"🧠 <b>Оценка ИИ</b>\n\n«{html.escape(probe[:150])}»\n\n"
-            f"Вердикт: <b>{names[res['level']]}</b>\n"
+            f"🧠 <b>Оценка ИИ по правилам клана</b>\n\n"
+            f"«{html.escape(probe[:150])}»\n\n"
+            f"Вердикт: <b>{names[res['level']]}</b>{category}\n"
             f"💬 {html.escape(res['reason'])}{extra}")
 
     # статус

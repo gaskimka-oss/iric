@@ -146,7 +146,12 @@ async def on_new_members(message: Message, bot: Bot):
     for u in message.new_chat_members or []:
         if u.id == me.id or u.is_bot:
             continue
-        await db.get_user(u.id)
+        await db.touch_user(u.id, u.username, u.first_name)
+        try:
+            import core_members
+            await core_members.remember_member(message.chat.id, u.id, "member", True)
+        except Exception:
+            pass
         if tmpl:
             text = (tmpl.replace("%имя%", html.escape(u.first_name or ""))
                         .replace("%чат%", html.escape(message.chat.title or "")))

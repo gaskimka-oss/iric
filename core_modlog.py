@@ -72,7 +72,7 @@ async def write(chat_id: int, punish_id: int, target_id: int, target_name: str,
         import core_ai as ai
         if ai.available() and log_id:
             asyncio.create_task(_ai_review(
-                log_id, chat_id, kind, reason, seconds,
+                log_id, punish_id, chat_id, target_id, kind, reason, seconds,
                 target_name or str(target_id),
                 by_name or "автомодерация", context, bot))
     except Exception:
@@ -80,12 +80,35 @@ async def write(chat_id: int, punish_id: int, target_id: int, target_name: str,
     return log_id
 
 
-async def _ai_review(log_id: int, chat_id: int, kind: str, reason: str,
+async def _ai_review(log_id: int, punish_id: int, chat_id: int,
+                     target_id: int, kind: str, reason: str,
                      seconds: int, target: str, moderator: str,
                      context: str, bot: Bot | None) -> None:
     """Фоновая проверка наказания. Спорные — показываем владельцу."""
     import core_ai as ai
     try:
+        # Лестница санкций зависит от номера нарушения. Передаём ИИ только
+        # реальные предыдущие записи, не включая только что созданную.
+        previous = await db.fetchall(
+            "SELECT kind,reason,seconds,ts FROM punishments WHERE chat_id=? "
+            "AND user_id=? AND id<>? ORDER BY id DESC LIMIT 6",
+            (chat_id, target_id, punish_id))
+        if previous:
+            kinds = {"mute": "мут", "ban": "бан", "warn": "предупреждение",
+                     "kick": "кик"}
+            hist = []
+            for p in reversed(previous):
+                date = time.strftime("%d.%m %H:%M", time.localtime(p["ts"]))
+                duration = f" на {p['seconds']} сек." if p["seconds"] else ""
+                hist.append(
+                    f"- {date}: {kinds.get(p['kind'], p['kind'])}{duration}; "
+                    f"причина: {p['reason'] or 'не указана'}")
+            context = (context or "(нет переписки)") + \
+                      "\n\nПодтверждённая предыдущая история наказаний:\n" + "\n".join(hist)
+        else:
+            context = (context or "(нет переписки)") + \
+                      "\n\nПредыдущих наказаний в базе не найдено."
+
         r = await ai.review_punishment(kind, reason, seconds, target,
                                        moderator, context)
         if not r:
@@ -105,7 +128,9 @@ async def _ai_review(log_id: int, chat_id: int, kind: str, reason: str,
         from core_resolve import human_period
         kinds = {"mute": "🔇 Мут", "ban": "🔨 Бан",
                  "warn": "⚠️ Варн", "kick": "👢 Кик"}
-        term = human_period(seconds) if seconds else "бессрочно"
+        term = (human_period(seconds) if seconds else
+                "без срока" if kind == "warn" else
+                "однократно" if kind == "kick" else "бессрочно")
         text = ai.render_review(r, kinds.get(kind, kind), target,
                                 moderator, term)
         text += f"\n\n<code>#{log_id}</code> · разбор: <code>админ</code>"

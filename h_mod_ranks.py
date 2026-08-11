@@ -9,6 +9,7 @@ from aiogram import Bot, Router
 from aiogram.types import Message
 
 import db
+import core_members as members
 from core_ranks import effective_rank, get_rank, rank_label, rank_name, require, set_rank
 from core_registry import MAX_RANK, RANK_NAMES, RANK_TITLES, Cmd, stars
 from core_resolve import resolve_target
@@ -351,11 +352,21 @@ async def cmd_call_mods(message: Message, bot: Bot, args: str = "", **kw):
     if not await require(message, bot, 1):
         return
     rows = await db.fetchall(
-        "SELECT r.user_id, u.first_name FROM ranks r LEFT JOIN users u ON u.user_id=r.user_id "
-        "WHERE r.chat_id=? AND r.rank>=1", (message.chat.id,))
-    if not rows:
-        return await message.reply("Модераторов нет.")
-    tags = " ".join(mention_id(r["user_id"], r["first_name"]) for r in rows[:30])
+        "SELECT r.user_id,u.first_name,u.username,r.rank,"
+        "COALESCE(s.last_seen,0) last_seen FROM ranks r "
+        "LEFT JOIN users u ON u.user_id=r.user_id "
+        "LEFT JOIN chat_stats s ON s.chat_id=r.chat_id AND s.user_id=r.user_id "
+        "WHERE r.chat_id=? AND r.rank>=1 ORDER BY r.rank DESC,last_seen DESC",
+        (message.chat.id,))
+    me = await bot.me()
+    people = await members.verified_members(
+        bot, message.chat.id, rows, exclude=(me.id, message.from_user.id))
+    if not people:
+        return await message.reply("В чате нет присутствующих модераторов.")
+    tags = " ".join(
+        members.summon_mention(p["user_id"], p.get("first_name"),
+                               p.get("username"))
+        for p in people[:30])
     await message.reply(f"📣 <b>Созыв модерации!</b>\n"
                         f"Причина: {html.escape(args) if args else 'требуется внимание'}\n\n{tags}")
 
@@ -395,7 +406,7 @@ PERSON_RE = re.compile(
     r"([A-Za-z0-9_]+)[^)]*\)|@([A-Za-z0-9_]{4,})|(.+?))\s*$")
 
 TITLE_TO_RANK = {
-    "лидер клана": 7, "лидеры клана": 7, "лидеры кланов": 7,
+    "лидер клана": 8, "лидеры клана": 8, "лидеры кланов": 8,
     "технический администратор": 6, "технические администраторы": 6, "тех админ": 6,
     "создатель": 5, "создатели": 5,
     "старший админ": 4, "старшие админы": 4, "старший администратор": 4,

@@ -11,6 +11,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
                            InlineKeyboardMarkup, Message)
 
 import db
+import core_members as members
 from config import REP_COOLDOWN
 from core_ranks import require
 from core_registry import Cmd
@@ -499,13 +500,24 @@ async def report(message: Message, bot: Bot, args: str = "", **kw):
     await db.execute("INSERT INTO reports (chat_id,user_id,target_id,text,ts) VALUES (?,?,?,?,?)",
                      (message.chat.id, message.from_user.id, tgt.id if tgt else 0,
                       args or "без описания", int(time.time())))
-    mods = await db.fetchall("SELECT r.user_id, u.first_name FROM ranks r "
-                             "LEFT JOIN users u ON u.user_id=r.user_id "
-                             "WHERE r.chat_id=? AND r.rank>=1", (message.chat.id,))
-    tags = " ".join(mention_id(m["user_id"], m["first_name"]) for m in mods[:20])
+    mods = await db.fetchall(
+        "SELECT r.user_id,u.first_name,u.username,r.rank,"
+        "COALESCE(s.last_seen,0) last_seen FROM ranks r "
+        "LEFT JOIN users u ON u.user_id=r.user_id "
+        "LEFT JOIN chat_stats s ON s.chat_id=r.chat_id AND s.user_id=r.user_id "
+        "WHERE r.chat_id=? AND r.rank>=1 ORDER BY r.rank DESC,last_seen DESC",
+        (message.chat.id,))
+    me = await bot.me()
+    present_mods = await members.verified_members(
+        bot, message.chat.id, mods, exclude=(me.id, message.from_user.id))
+    tags = " ".join(
+        members.summon_mention(m["user_id"], m.get("first_name"),
+                               m.get("username"))
+        for m in present_mods[:20])
     await message.reply(f"📣 <b>Жалоба отправлена</b>\n"
                         f"На: {mention_id(tgt.id, tgt.first_name) if tgt else '—'}\n"
-                        f"Причина: {html.escape(args or 'без описания')}\n\n{tags}")
+                        f"Причина: {html.escape(args or 'без описания')}\n\n"
+                        f"{tags or '<i>Присутствующие модераторы не найдены.</i>'}")
 
 
 @router.message(Cmd("репорты", "жалобы", section=S_REPORT, rank=1, usage="репорты",

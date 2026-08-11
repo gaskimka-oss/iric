@@ -14,6 +14,7 @@ from aiogram import Bot, Router
 from aiogram.types import ChatPermissions, Message
 
 import db
+import core_members as members
 from config import WARN_LIMIT, WARN_MUTE_HOURS
 import core_modlog as modlog
 from core_punish import (KIND_NAMES, check_reason, explain_error, guard_target,
@@ -173,6 +174,7 @@ async def cmd_ban(message: Message, bot: Bot, args: str = "", **kw):
         await bot.ban_chat_member(message.chat.id, uid, until_date=until)
     except Exception as e:
         return await message.reply(explain_error(e, "забанить"))
+    await members.remember_member(message.chat.id, uid, "kicked", False)
     pid = await log_punish(message.chat.id, uid, "ban", reason, secs,
                            message.from_user.id if message.from_user else 0)
     await db.execute(
@@ -207,6 +209,8 @@ async def cmd_unban(message: Message, bot: Bot, args: str = "", **kw):
     except Exception as e:
         return await message.reply(explain_error(e, "разбанить"))
     await db.execute("DELETE FROM bans WHERE chat_id=? AND user_id=?", (message.chat.id, uid))
+    # Разбан открывает возможность войти, но сам по себе не возвращает в чат.
+    await members.remember_member(message.chat.id, uid, "left", False)
     await lift_punish(message.chat.id, uid, "ban", message.from_user.id)
     await message.reply(f"✅ {mention_id(uid, name)} разблокирован.")
 
@@ -234,6 +238,7 @@ async def cmd_kick(message: Message, bot: Bot, args: str = "", **kw):
         await bot.unban_chat_member(message.chat.id, uid)
     except Exception as e:
         return await message.reply(explain_error(e, "кикнуть"))
+    await members.remember_member(message.chat.id, uid, "left", False)
     pid = await log_punish(message.chat.id, uid, "kick", rest, 0, message.from_user.id)
     ctx = await modlog.build_context(message.chat.id, uid)
     await modlog.write(message.chat.id, pid, uid, name,
@@ -318,13 +323,24 @@ async def cmd_unwarn(message: Message, bot: Bot, args: str = "", **kw):
     uid, name, _ = await resolve_target(message, args, bot)
     if not uid:
         return await message.reply("Укажите пользователя.")
-    await db.execute("DELETE FROM warns WHERE id=(SELECT id FROM warns WHERE chat_id=? "
-                     "AND user_id=? ORDER BY id DESC LIMIT 1)", (message.chat.id, uid))
+    latest = await db.fetchone(
+        "SELECT id FROM warns WHERE chat_id=? AND user_id=? ORDER BY id DESC LIMIT 1",
+        (message.chat.id, uid))
+    if not latest:
+        return await message.reply(
+            f"ℹ️ У {mention_id(uid, name)} <b>отсутствуют предупреждения</b> — "
+            "снимать нечего.")
+    await db.execute("DELETE FROM warns WHERE id=?", (latest["id"],))
     await db.execute("UPDATE punishments SET active=0, lifted_by=?, lifted_ts=? WHERE id="
                      "(SELECT id FROM punishments WHERE chat_id=? AND user_id=? AND kind='warn' "
                      "AND active=1 ORDER BY id DESC LIMIT 1)",
                      (message.from_user.id, int(time.time()), message.chat.id, uid))
-    await message.reply(f"✅ Снято одно предупреждение с {mention_id(uid, name)}.")
+    left = await db.fetchone(
+        "SELECT COUNT(*) c FROM warns WHERE chat_id=? AND user_id=?",
+        (message.chat.id, uid))
+    await message.reply(
+        f"✅ Снято одно предупреждение с {mention_id(uid, name)}.\n"
+        f"Осталось: <b>{int(left['c']) if left else 0}</b>.")
 
 
 @router.message(Cmd("варнлист", "варн лист", "список варнов", "все варны",

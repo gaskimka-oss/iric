@@ -10,6 +10,7 @@ from aiogram.types import (CallbackQuery, InlineQuery, InlineQueryResultArticle,
                            InputTextMessageContent, Message)
 
 import db
+import core_members as members
 from core_ranks import effective_rank, rank_label, rank_name, require
 from core_registry import REGISTRY, Cmd, find_commands
 from core_resolve import human_period, parse_period, resolve_target
@@ -246,12 +247,17 @@ async def autokick(message: Message, bot: Bot, args: str = "", **kw):
 async def tag_all(message: Message, bot: Bot, args: str = "", **kw):
     if not await require(message, bot, 2):
         return
-    rows = await db.fetchall("SELECT s.user_id, u.first_name FROM chat_stats s "
-                             "LEFT JOIN users u ON u.user_id=s.user_id WHERE s.chat_id=? "
-                             "ORDER BY s.last_seen DESC LIMIT 30", (message.chat.id,))
-    if not rows:
-        return await message.reply("Некого тегать.")
-    tags = " ".join(mention_id(r["user_id"], r["first_name"]) for r in rows)
+    rows = await members.known_chat_rows(message.chat.id, limit=100)
+    me = await bot.me()
+    people = await members.verified_members(
+        bot, message.chat.id, rows, exclude=(me.id, message.from_user.id))
+    if not people:
+        return await message.reply("Некого тегать: присутствующие участники не найдены.")
+    people = people[:30]
+    tags = " ".join(
+        members.summon_mention(p["user_id"], p.get("first_name"),
+                               p.get("username"))
+        for p in people)
     await message.reply(f"📢 {html.escape(args or 'Внимание!')}\n\n{tags}")
 
 

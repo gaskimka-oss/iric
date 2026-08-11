@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from aiogram import Bot, Router
-from aiogram.types import Message
+from aiogram.types import FSInputFile, Message
 
 import db
 from core_registry import Cmd
@@ -93,6 +94,12 @@ ACTIONS: dict[str, tuple[str, str]] = {
     "оживить": ("✨", "оживляет"),
 }
 
+# У каждой команды своя локальная карточка: никаких внешних ссылок/CDN во
+# время работы бота. Порядок совпадает с ACTIONS и генератором в tools/.
+_RP_DIR = Path(__file__).resolve().parent / "rp_images"
+RP_IMAGES = {action: _RP_DIR / f"rp_{i:02d}.jpg"
+             for i, action in enumerate(ACTIONS, 1)}
+
 # Список синонимов -> каноничное действие
 ALIASES = {
     "обнимашки": "обнять", "обниму": "обнять", "хаг": "обнять",
@@ -118,14 +125,28 @@ async def _do_action(message: Message, bot: Bot, args: str, action: str):
         return await message.reply(f"{emoji} Спасибо, приятно! 🤖")
 
     await db.execute(
-        "INSERT OR REPLACE INTO relations (user_id,target_id,kind,ts) VALUES (?,?,?,?)",
+        "INSERT INTO relations (user_id,target_id,kind,ts,count) VALUES (?,?,?,?,1) "
+        "ON CONFLICT(user_id,target_id,kind) DO UPDATE SET "
+        "ts=excluded.ts,count=relations.count+1",
         (message.from_user.id, uid, action, int(time.time())))
     cnt = await db.fetchone(
-        "SELECT COUNT(*) c FROM relations WHERE user_id=? AND kind=?",
+        "SELECT COALESCE(SUM(count),0) c FROM relations WHERE user_id=? AND kind=?",
         (message.from_user.id, action))
-    tail = f"\n<i>Всего раз: {cnt['c']}</i>" if cnt and cnt["c"] > 1 else ""
-    await message.reply(f"{emoji} {mention(message.from_user)} {verb} "
-                        f"{mention_id(uid, name)}!{tail}")
+    total = int(cnt["c"]) if cnt else 1
+    caption = (f"{emoji} {mention(message.from_user)} {verb} "
+               f"{mention_id(uid, name)}!\n<i>Всего раз: {total}</i>")
+
+    image = RP_IMAGES.get(action)
+    if image and image.is_file():
+        try:
+            return await message.answer_photo(
+                FSInputFile(image), caption=caption,
+                reply_to_message_id=message.message_id)
+        except Exception:
+            # Если Telegram временно не принял медиа, само действие всё равно
+            # должно отработать текстом.
+            pass
+    await message.reply(caption)
 
 
 def _make(action: str):
@@ -169,7 +190,7 @@ async def cmd_rel_stats(message: Message, bot: Bot, args: str = "", **kw):
     if not uid:
         uid, name = message.from_user.id, message.from_user.first_name
     rows = await db.fetchall(
-        "SELECT kind, COUNT(*) c FROM relations WHERE user_id=? GROUP BY kind "
+        "SELECT kind, SUM(count) c FROM relations WHERE user_id=? GROUP BY kind "
         "ORDER BY c DESC LIMIT 15", (uid,))
     if not rows:
         return await message.reply(f"У {mention_id(uid, name)} пока нет РП-действий.\n"

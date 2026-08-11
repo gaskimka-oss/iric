@@ -124,9 +124,64 @@ async def wipe_duplicate_profiles() -> int:
     return wiped
 
 
+async def remove_false_krueger_leadership() -> int:
+    """Одноразово снимает ошибочно выданный Krueger высший ранг.
+
+    В рабочей базе этот пользователь мог находиться и в ``ranks``, и в
+    импортированном ``staff``. Маркер не позволяет повторять чистку после того,
+    как владелец когда-нибудь назначит человека заново вручную.
+    """
+    marker = "cleanup_krueger_leader_v1"
+    if await db.get_setting(0, marker, "") == "done":
+        return 0
+
+    rows = await db.fetchall(
+        "SELECT user_id FROM users WHERE "
+        "lower(ltrim(COALESCE(username,''),'@'))='krueger' "
+        "OR lower(trim(COALESCE(first_name,'')))='krueger' "
+        "OR lower(trim(COALESCE(first_name,''))) LIKE 'krueger %' "
+        "UNION SELECT user_id FROM staff WHERE user_id>0 AND ("
+        "lower(ltrim(COALESCE(username,''),'@'))='krueger' "
+        "OR lower(trim(COALESCE(name,'')))='krueger' "
+        "OR lower(trim(COALESCE(name,''))) LIKE 'krueger %')")
+    user_ids = {int(r["user_id"]) for r in rows if int(r["user_id"] or 0) > 0}
+
+    removed = 0
+    for uid in user_ids:
+        rank_rows = await db.fetchone(
+            "SELECT COUNT(*) c FROM ranks WHERE user_id=? AND rank>=7", (uid,))
+        staff_rows = await db.fetchone(
+            "SELECT COUNT(*) c FROM staff WHERE user_id=? AND rank>=7", (uid,))
+        removed += int(rank_rows["c"] if rank_rows else 0)
+        removed += int(staff_rows["c"] if staff_rows else 0)
+        await db.execute("DELETE FROM ranks WHERE user_id=? AND rank>=7", (uid,))
+        await db.execute("DELETE FROM staff WHERE user_id=? AND rank>=7", (uid,))
+
+    direct = await db.fetchone(
+        "SELECT COUNT(*) c FROM staff WHERE rank>=7 AND ("
+        "lower(ltrim(COALESCE(username,''),'@'))='krueger' "
+        "OR lower(trim(COALESCE(name,'')))='krueger' "
+        "OR lower(trim(COALESCE(name,''))) LIKE 'krueger %')")
+    removed += int(direct["c"] if direct else 0)
+    await db.execute(
+        "DELETE FROM staff WHERE rank>=7 AND ("
+        "lower(ltrim(COALESCE(username,''),'@'))='krueger' "
+        "OR lower(trim(COALESCE(name,'')))='krueger' "
+        "OR lower(trim(COALESCE(name,''))) LIKE 'krueger %')")
+    await db.set_setting(0, marker, "done")
+    if removed:
+        log.info("С Krueger снят ошибочный ранг лидера (записей: %d)", removed)
+    return removed
+
+
 async def apply() -> None:
     now = int(time.time())
     added_s = added_st = 0
+
+    try:
+        await remove_false_krueger_leadership()
+    except Exception as e:
+        log.warning("снятие ошибочного лидера Krueger: %s", e)
 
     try:
         await mark_filled_profiles()

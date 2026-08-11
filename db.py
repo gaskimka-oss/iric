@@ -39,6 +39,19 @@ CREATE TABLE IF NOT EXISTS chat_stats (
     PRIMARY KEY (chat_id, user_id)
 );
 
+-- Последнее известное состояние членства. Перед массовым созывом бот всё
+-- равно перепроверяет пользователя через Telegram API.
+CREATE TABLE IF NOT EXISTS chat_members (
+    chat_id   INTEGER NOT NULL,
+    user_id   INTEGER NOT NULL,
+    status    TEXT NOT NULL DEFAULT 'member',
+    is_member INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (chat_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_members_active
+    ON chat_members(chat_id, is_member, updated_at);
+
 CREATE TABLE IF NOT EXISTS chats (
     chat_id   INTEGER PRIMARY KEY,
     title     TEXT,
@@ -207,7 +220,8 @@ CREATE TABLE IF NOT EXISTS clan_members (
 
 CREATE TABLE IF NOT EXISTS relations (
     user_id INTEGER NOT NULL, target_id INTEGER NOT NULL, kind TEXT NOT NULL,
-    ts INTEGER, PRIMARY KEY (user_id, target_id, kind));
+    ts INTEGER, count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, target_id, kind));
 
 CREATE TABLE IF NOT EXISTS awards (
     id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, user_id INTEGER,
@@ -311,6 +325,7 @@ async def _migrate() -> None:
                     ("ai_reason", "TEXT"), ("ai_advice", "TEXT")],
         "users": [("verified", "INTEGER NOT NULL DEFAULT 0"),
                   ("grams", "INTEGER NOT NULL DEFAULT 0")],
+        "relations": [("count", "INTEGER NOT NULL DEFAULT 1")],
         "profiles": [("gender", "TEXT"), ("custom", "TEXT"), ("custom_by", "INTEGER"),
                      ("custom_ts", "INTEGER"),
                      ("real_name", "TEXT"), ("country", "TEXT"), ("tz", "TEXT"),
