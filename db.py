@@ -703,3 +703,8 @@ async def add_rel_child(rel_id: int, name: str, gender: str) -> None:
         "INSERT INTO relationship_children (rel_id, name, gender, born_at, care_last_ts) "
         "VALUES (?,?,?,?,?)", (rel_id, name, gender, int(time.time()), int(time.time())))
 
+
+async def get_all_relationships() -> list[dict]:
+    return await fetchall("SELECT * FROM relationships ORDER BY level DESC, xp DESC, id ASC")
+
+

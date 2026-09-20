@@ -215,6 +215,51 @@ async def cmd_rel_main(message: Message, bot: Bot, args: str = "", **kw):
     await message.reply(card, reply_markup=rel_main_keyboard(rel["id"]), disable_web_page_preview=True)
 
 
+@router.message(Cmd("отн список", "список отн", "отношения список", "список отношений",
+                    "пары", "все отн", "пары чата", section=S_REL,
+                    usage="отн список", desc="Список пар и отношений"))
+async def cmd_relations_list(message: Message, bot: Bot, **kw):
+    rels = await db.get_all_relationships()
+    if not rels:
+        return await message.reply(
+            "💔 <b>В базе пока нет зарегистрированных пар!</b>\n\n"
+            "Чтобы создать пару, напишите: <code>отн @юзер</code> или ответьте на его сообщение командой <code>отн</code>.",
+            disable_web_page_preview=True)
+
+    lines = ["💍 <b>Список пар и отношений:</b>\n"]
+    count = 0
+    now = int(time.time())
+    for idx, r in enumerate(rels, 1):
+        u1 = await db.get_user(r["user1_id"])
+        u2 = await db.get_user(r["user2_id"])
+        n1 = u1["first_name"] or f"ID:{r['user1_id']}"
+        n2 = u2["first_name"] or f"ID:{r['user2_id']}"
+        days = max(1, (now - r["created_at"]) // 86400)
+
+        m1 = mention_id(r["user1_id"], n1)
+        m2 = mention_id(r["user2_id"], n2)
+
+        if r["offended_by"]:
+            status_icon = "💔 В обиде"
+        else:
+            status_icon = "💖 В согласии"
+
+        lines.append(
+            f"<b>{idx}.</b> 👩‍❤️‍👨 {m1} ➕ {m2}\n"
+            f"   ▫️ Уровень: <b>🌟 {r['level']} ур.</b> ({r['xp']:,} ❤️)\n"
+            f"   ▫️ Вместе: <b>{days} дн.</b> · {status_icon}\n"
+        )
+        count += 1
+        if count >= 30:
+            lines.append("<i>... и другие пары</i>\n")
+            break
+
+    lines.append(f"Всего союзов: <b>{len(rels)}</b>")
+    lines.append("💡 <i>Чтобы посмотреть карточку своей пары — напишите <code>отн</code></i>")
+
+    await message.reply("\n".join(lines), disable_web_page_preview=True)
+
+
 @router.message(Cmd("отн меню", "меню отн", "меню пары", section=S_REL,
                     usage="отн меню", desc="Интерактивное меню отношений"))
 async def cmd_rel_menu(message: Message, bot: Bot, **kw):

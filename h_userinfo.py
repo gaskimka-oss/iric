@@ -327,7 +327,7 @@ async def cmd_info(message: Message, bot: Bot, args: str = "", **kw):
                         disable_web_page_preview=True)
 
 
-@router.message(Cmd("кто я", "я кто", "кто йа", section=S, group_only=True,
+@router.message(Cmd("кто я", "я кто", "кто йа", "профиль", "мой профиль", section=S,
                     usage="кто я", desc="Карточка о себе"))
 async def cmd_who_am_i(message: Message, bot: Bot, **kw):
     await message.reply(
@@ -336,7 +336,7 @@ async def cmd_who_am_i(message: Message, bot: Bot, **kw):
         disable_web_page_preview=True)
 
 
-@router.message(Cmd("кто ты", "ты кто", section=S, group_only=True,
+@router.message(Cmd("кто ты", "ты кто", section=S,
                     usage="кто ты [ссылка]", desc="Информация о пользователе или боте"))
 async def cmd_who_are_you(message: Message, bot: Bot, args: str = "", **kw):
     from core_resolve import real_reply

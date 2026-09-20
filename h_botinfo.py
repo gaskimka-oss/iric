@@ -1,7 +1,6 @@
-"""Команда «бот»: статус онлайн/офлайн, пинг, аптайм, нагрузка."""
-from __future__ import annotations
-
+import asyncio
 import html
+import logging
 import platform
 import time
 
@@ -11,6 +10,7 @@ from aiogram.types import Message
 import db
 from core_registry import REGISTRY, Cmd
 
+log = logging.getLogger("irisbot.botinfo")
 router = Router(name="botinfo")
 S = 32
 
@@ -123,6 +123,58 @@ UPDATE_TEXT = (
                     usage="обновление", desc="Что нового в последней версии бота"))
 async def cmd_updates(message: Message, **kw):
     await message.reply(UPDATE_TEXT, disable_web_page_preview=True)
+
+
+async def announce_update_on_startup(bot: Bot) -> None:
+    """Одноразово рассылает анонс обновления в чаты при первом запуске новой версии."""
+    marker = "update_announced_20_09_2026_v1"
+    if await db.get_setting(0, marker, "") == "1":
+        return
+    await db.set_setting(0, marker, "1")
+
+    from core_seed import MAIN_CHAT
+    try:
+        await bot.send_message(MAIN_CHAT, UPDATE_TEXT, disable_web_page_preview=True)
+        log.info("Анонс обновления отправлен в MAIN_CHAT (%s)", MAIN_CHAT)
+    except Exception as e:
+        log.warning("Не удалось отправить анонс в MAIN_CHAT: %s", e)
+
+    try:
+        chats = await db.fetchall("SELECT chat_id FROM chats WHERE is_active=1")
+        for ch in chats:
+            cid = ch["chat_id"]
+            if cid != MAIN_CHAT and cid < 0:
+                try:
+                    await bot.send_message(cid, UPDATE_TEXT, disable_web_page_preview=True)
+                    await asyncio.sleep(0.15)
+                except Exception:
+                    pass
+    except Exception as e:
+        log.warning("Рассылка анонса по чатам: %s", e)
+
+
+@router.message(Cmd("разослать обновление", "анонс обновления", section=S, rank=8, hidden=True,
+                    usage="разослать обновление", desc="Разослать анонс обновления по всем чатам"))
+async def cmd_broadcast_updates(message: Message, bot: Bot, **kw):
+    if not await _owner_only(message):
+        return
+    m = await message.reply("📢 Начинаю рассылку обновления по чатам…")
+    sent = 0
+    chats = await db.fetchall("SELECT chat_id FROM chats WHERE is_active=1")
+    target_ids = set()
+    from core_seed import MAIN_CHAT
+    target_ids.add(MAIN_CHAT)
+    for ch in chats:
+        if ch["chat_id"] < 0:
+            target_ids.add(ch["chat_id"])
+    for cid in target_ids:
+        try:
+            await bot.send_message(cid, UPDATE_TEXT, disable_web_page_preview=True)
+            sent += 1
+            await asyncio.sleep(0.1)
+        except Exception:
+            pass
+    await m.edit_text(f"✅ Анонс обновления успешно отправлен в {sent} чат(ов)!")
 
 
 # ---------------- ХРАНИЛИЩЕ И РЕЗЕРВНЫЕ КОПИИ ----------------

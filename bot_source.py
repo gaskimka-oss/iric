@@ -273,6 +273,7 @@ async def main() -> None:
     asyncio.create_task(chatlock.schedule_worker(bot))
     asyncio.create_task(tournament.schedule_worker(bot))
     asyncio.create_task(backup.worker(bot))
+    asyncio.create_task(botinfo.announce_update_on_startup(bot))
     await health.start()          # порт для healthcheck хостинга
 
     try:
