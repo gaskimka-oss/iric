@@ -3,7 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import time
+
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -40,6 +49,8 @@ import h_automod as automod
 import h_adminpanel as adminpanel
 import h_tournament as tournament
 import core_clan_sync as clan_sync
+import h_relations as relations
+import h_vip as vip
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
@@ -211,7 +222,7 @@ async def main() -> None:
     # ДК применяется ко всем командным роутерам
     for r in (helpmenu.router, mod_ranks.router, mod_bans.router, chatset.router,
               dk.router, chatlock.router, fun.router, modules.router, rp.router,
-              userinfo.router, tournament.router):
+              userinfo.router, tournament.router, relations.router, vip.router):
         r.message.middleware(access_middleware)
 
     dp.include_router(nav.router)
@@ -228,6 +239,8 @@ async def main() -> None:
     dp.include_router(automod.router)
     dp.include_router(chatset.router)
     dp.include_router(fun.router)
+    dp.include_router(relations.router)
+    dp.include_router(vip.router)
     dp.include_router(modules.router)
     dp.include_router(grams.router)
     dp.include_router(tournament.router)

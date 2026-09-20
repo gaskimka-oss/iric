@@ -17,12 +17,17 @@ import zipfile
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+ROOT = Path(__file__).resolve().parent if (Path(__file__).resolve().parent / "bot_source.py").is_file() else Path(__file__).resolve().parents[1]
 OUT = ROOT / "bot.py"
 
 # файлы верхнего уровня, которые попадают в пакет
 SKIP = {"bot.py"}            # сам пакет не пакуем
-EXCLUDE_PREFIXES = ("bot_source",)
+EXCLUDE_PREFIXES = ("bot_source", "bot_iric", "build_single")
 
 
 def collect_files() -> dict[str, bytes]:
@@ -73,6 +78,14 @@ import runpy
 import shutil
 import sys
 import zipfile
+
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 _VERSION = "{version}"
 _PAYLOAD = r"""

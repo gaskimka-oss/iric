@@ -57,19 +57,57 @@ async def cmd_balance(message: Message, bot: Bot, args: str = "", **kw):
         f"📊 Всего: {money(u['balance'] + u['bank'])}{vip_s}")
 
 
+CASINO_TOPIC_ID = 132681
+CASINO_TOPIC_URL = "https://t.me/c/3934033202/132681"
+
+
 @router.message(Cmd("работа", "работать", "пахать", "work", section=S_BONUS,
-                    usage="работа", desc="Заработать ириски"))
+                    usage="работа", desc="Заработать ириски (только в теме Казино)"))
 async def cmd_work(message: Message, **kw):
     uid = message.from_user.id
+
+    # Ограничение по теме (топику) казино
+    if message.chat.type != "private":
+        thread_id = getattr(message, "message_thread_id", None)
+        if thread_id and thread_id != CASINO_TOPIC_ID:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            from h_userinfo import _autodel
+            warn = await message.answer(
+                f"⚠️ {mention(message.from_user)}, команду <code>работа</code> можно использовать только в теме:\n"
+                f"🎰 <a href=\"{CASINO_TOPIC_URL}\">Казино / Работа</a>\n\n"
+                f"👉 Перейдите в нужную тему, чтобы заработать ириски!",
+                disable_web_page_preview=True)
+            _autodel(warn, 60)
+            return
+
     left = await db.cooldown_left(uid, "work", WORK_COOLDOWN)
     if left:
         return await message.reply(f"😮‍💨 Отдохни ещё <b>{hms(left)}</b>.")
-    amount = random.randint(*WORK_REWARD)
+
+    base_amount = random.randint(*WORK_REWARD)
+    vip_lvl, _, vip_active = await db.get_vip_info(uid)
+    bonus = 0
+    vip_tag = ""
+    if vip_active:
+        if vip_lvl >= 2:
+            bonus = base_amount  # +100% для VIP+
+            vip_tag = "\n🌟 <i>Бонус VIP+: +100% к награде!</i>"
+        elif vip_lvl >= 1:
+            bonus = int(base_amount * 0.5)  # +50% для VIP
+            vip_tag = "\n⭐️ <i>Бонус VIP: +50% к награде!</i>"
+
+    amount = base_amount + bonus
     bal = await db.add_balance(uid, amount, "work")
     await db.set_cooldown(uid, "work")
     jobs = ["разгрузил вагон ирисок", "чинил сервер Ириса", "выгуливал корги",
-            "продавал мемы", "варил кофе", "тестировал баги в проде"]
-    await message.reply(f"🛠 Ты {random.choice(jobs)}: <b>+{money(amount)}</b>\nБаланс: {money(bal)}")
+            "продавал мемы", "варил кофе", "тестировал баги в проде",
+            "собирал урожай на ферме", "помогал в казино"]
+    await message.reply(
+        f"🛠 Ты {random.choice(jobs)}: <b>+{money(amount)}</b>{vip_tag}\n"
+        f"Баланс: {money(bal)}")
 
 
 @router.message(Cmd("крайм", "преступление", "рискнуть", section=S_BONUS,
@@ -122,32 +160,6 @@ async def cmd_top(message: Message, **kw):
     lines = [f"{medals[i]} {mention_id(r['user_id'], r['first_name'])} — {money(r['total'])}"
              for i, r in enumerate(rows)]
     await message.reply("🏆 <b>Топ по ирискам</b>\n\n" + ("\n".join(lines) or "пусто"))
-
-
-@router.message(Cmd("вип", "vip", section=S_BONUS, usage="вип", desc="Статус VIP"))
-async def cmd_vip(message: Message, **kw):
-    row = await db.fetchone("SELECT until FROM vip WHERE user_id=?", (message.from_user.id,))
-    if row and row["until"] > time.time():
-        left = int(row["until"] - time.time())
-        return await message.reply(f"💎 VIP активен ещё <b>{human_period(left)}</b>\n"
-                                   f"Бонусы: удвоенный ежедневный бонус.")
-    await message.reply("💎 VIP не активен.\nВыдаётся владельцем бота: <code>выдать вип @user 30 дней</code>")
-
-
-@router.message(Cmd("выдать вип", "дать вип", section=S_BONUS, rank=5,
-                    usage="выдать вип {ссылка} {период}", desc="Выдать VIP (владелец)"))
-async def cmd_give_vip(message: Message, bot: Bot, args: str = "", **kw):
-    if not await require(message, bot, 5):
-        return
-    uid, name, rest = await resolve_target(message, args, bot)
-    if not uid:
-        return await message.reply("Укажите пользователя.")
-    secs, _ = parse_period(rest)
-    secs = secs or 30 * 86400
-    await db.execute("INSERT INTO vip (user_id, until, level) VALUES (?,?,1) "
-                     "ON CONFLICT(user_id) DO UPDATE SET until=excluded.until",
-                     (uid, int(time.time()) + secs))
-    await message.reply(f"💎 {mention_id(uid, name)} получил VIP на <b>{human_period(secs)}</b>")
 
 
 # ---------- 14. Развлечения ----------

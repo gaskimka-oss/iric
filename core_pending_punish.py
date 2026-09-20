@@ -63,6 +63,8 @@ async def apply_for_user(bot: Bot, chat_id: int, user: User) -> int:
                 until = (datetime.now(timezone.utc) + timedelta(seconds=seconds)) \
                     if seconds else None
                 await bot.ban_chat_member(chat_id, user.id, until_date=until)
+                await db.execute("DELETE FROM profiles WHERE user_id=?", (user.id,))
+                await db.execute("UPDATE users SET nick=NULL WHERE user_id=?", (user.id,))
                 await db.execute(
                     "INSERT INTO bans(chat_id,user_id,reason,by_id,until,ts) "
                     "VALUES (?,?,?,?,?,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET "

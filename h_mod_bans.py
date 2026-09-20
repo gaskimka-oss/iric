@@ -175,6 +175,10 @@ async def cmd_ban(message: Message, bot: Bot, args: str = "", **kw):
     except Exception as e:
         return await message.reply(explain_error(e, "забанить"))
     await members.remember_member(message.chat.id, uid, "kicked", False)
+    # Очищаем анкету, описание и ник забаненного игрока
+    await db.execute("DELETE FROM profiles WHERE user_id=?", (uid,))
+    await db.execute("UPDATE users SET nick=NULL WHERE user_id=?", (uid,))
+
     pid = await log_punish(message.chat.id, uid, "ban", reason, secs,
                            message.from_user.id if message.from_user else 0)
     await db.execute(

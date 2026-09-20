@@ -111,6 +111,13 @@ ALIASES = {
 }
 
 
+ROMANTIC_ACTIONS = {
+    "обнять", "поцеловать", "чмокнуть", "погладить", "приласкать",
+    "прижать", "взять за руку", "потискать", "укрыть пледом",
+    "признаться", "флиртовать", "подарить подарок", "подарить цветы"
+}
+
+
 async def _do_action(message: Message, bot: Bot, args: str, action: str):
     uid, name, _ = await resolve_target(message, args, bot)
     emoji, verb = ACTIONS[action]
@@ -124,6 +131,22 @@ async def _do_action(message: Message, bot: Bot, args: str, action: str):
     if uid == me.id:
         return await message.reply(f"{emoji} Спасибо, приятно! 🤖")
 
+    # Проверка отношений и обиды
+    rel_note = ""
+    rel = await db.get_relationship(message.from_user.id)
+    if rel and uid in (rel["user1_id"], rel["user2_id"]):
+        if rel["offended_by"] == uid:
+            return await message.reply(
+                f"💔 <b>Ваш собеседник обижен на вас!</b>\n\n"
+                f"Романтические действия приостановлены пока он обижен на вас.\n"
+                f"Сделайте так, чтобы он не был обижен: <code>отн задобрить</code> (раз в 5 минут)!")
+
+        if action in ROMANTIC_ACTIONS:
+            vip_lvl, _, vip_act = await db.get_vip_info(message.from_user.id)
+            earned_xp = 3 if (vip_act and vip_lvl >= 2) else (2 if vip_act else 2)
+            await db.add_rel_xp(rel["id"], earned_xp)
+            rel_note = f"\n💖 <i>+{earned_xp} любви к отношениям пары!</i>"
+
     await db.execute(
         "INSERT INTO relations (user_id,target_id,kind,ts,count) VALUES (?,?,?,?,1) "
         "ON CONFLICT(user_id,target_id,kind) DO UPDATE SET "
@@ -134,7 +157,7 @@ async def _do_action(message: Message, bot: Bot, args: str, action: str):
         (message.from_user.id, action))
     total = int(cnt["c"]) if cnt else 1
     caption = (f"{emoji} {mention(message.from_user)} {verb} "
-               f"{mention_id(uid, name)}!\n<i>Всего раз: {total}</i>")
+               f"{mention_id(uid, name)}!\n<i>Всего раз: {total}</i>{rel_note}")
 
     image = RP_IMAGES.get(action)
     if image and image.is_file():
@@ -183,8 +206,8 @@ async def cmd_rp_list(message: Message, **kw):
     await message.reply(_safe_cut("\n".join(lines), 3900))
 
 
-@router.message(Cmd("отношения", "мои отношения", "статистика рп", section=S,
-                    usage="отношения", desc="Статистика ваших РП-действий"))
+@router.message(Cmd("рп статистика", "статистика рп", section=S,
+                    usage="рп статистика", desc="Статистика ваших РП-действий"))
 async def cmd_rel_stats(message: Message, bot: Bot, args: str = "", **kw):
     uid, name, _ = await resolve_target(message, args, bot)
     if not uid:

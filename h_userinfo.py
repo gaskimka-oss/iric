@@ -44,7 +44,7 @@ ALIASES = {
     "name": "имя", "звать": "имя", "country": "страна", "age": "возраст",
     "страна город": "страна", "время мск": "время по мск",
     "часовой пояс": "время по мск", "семейное": "семейное положение",
-    "статус": "семейное положение", "sex": "пол", "гендер": "пол",
+    "sex": "пол", "гендер": "пол",
 }
 
 TEMPLATE = """☆ Имя:
@@ -251,6 +251,15 @@ async def render_card(message: Message, bot: Bot, uid: int, name: str | None) ->
         out.append("💔 Не состоит в чате")
     out.append("")
     out.append(f"▫️ [{rank}] Ранг: {rank_name(rank) if rank else 'Простой участник'}")
+
+    # VIP-статус
+    vip_lvl, _, vip_active = await db.get_vip_info(uid)
+    if vip_active:
+        vip_str = "🌟 VIP+" if vip_lvl >= 2 else "⭐️ VIP"
+    else:
+        vip_str = "Отсутствует"
+    out.append(f"▫️ 💎 VIP: <b>{vip_str}</b>")
+
     out.append(f"Репутация: ✨ {u['rep']} | ➕ {u['messages']}")
     out.append(f"Первое появление: "
                f"{time.strftime('%d.%m.%Y', time.localtime(first_ts)) if first_ts else '—'}"
@@ -258,13 +267,41 @@ async def render_card(message: Message, bot: Bot, uid: int, name: str | None) ->
     out.append(f"Последний актив: {human_ago(last_ts)}")
     out.append(f"Актив (д|н|м|весь): {d} | {w} | {m_} | {short_num(allt)}")
 
-    shown = [f"▫️ ☆ {lbl}: {html.escape(str(p[col]))}"
-             for _, lbl, col in FIELDS if col in p.keys() and p[col]][:3]
+    # Семейное положение из актуальных отношений/брака
+    rel = await db.get_relationship(uid)
+    if rel:
+        other_id = rel["user2_id"] if rel["user1_id"] == uid else rel["user1_id"]
+        other_u = await db.get_user(other_id)
+        partner_name = other_u["first_name"] or str(other_id)
+        family_str = f"💍 В отношениях с {mention_id(other_id, partner_name)} (Ур. {rel['level']})"
+    elif u["married_to"]:
+        partner = await db.get_user(u["married_to"])
+        pname = partner["first_name"] or str(u["married_to"])
+        family_str = f"💍 В браке с {mention_id(u['married_to'], pname)}"
+    else:
+        family_str = "Холост(а)"
+
+    shown = []
+    if p["real_name"]:
+        shown.append(f"▫️ ☆ Имя: {html.escape(str(p['real_name']))}")
+    if p["age"]:
+        shown.append(f"▫️ ☆ Возраст: {html.escape(str(p['age']))}")
+    if p["country"]:
+        shown.append(f"▫️ ☆ Страна: {html.escape(str(p['country']))}")
+    if p["tz"]:
+        shown.append(f"▫️ ☆ Время по МСК: {html.escape(str(p['tz']))}")
+    shown.append(f"▫️ ☆ Семейное положение: {family_str}")
+    if u["nick"]:
+        shown.append(f"▫️ ☆ Ник: {html.escape(u['nick'])}")
+    elif p["hobby"] and len(p["hobby"]) <= 32:
+        shown.append(f"▫️ ☆ Ник: {html.escape(p['hobby'])}")
+    if p["gender"]:
+        shown.append(f"▫️ ☆ Пол: {html.escape(str(p['gender']))}")
+
     if shown:
         out.append("")
         out.append("▫️ О СЕБЕ:")
-        out += shown
-        out.append("▫️☆")
+        out += shown[:4]
         out.append("")
         out.append('🗓 Чтобы прочитать полное описание, введите команду '
                    '"описание @юзер"')
@@ -300,8 +337,14 @@ async def cmd_who_am_i(message: Message, bot: Bot, **kw):
 
 
 @router.message(Cmd("кто ты", "ты кто", section=S, group_only=True,
-                    usage="кто ты", desc="Информация о боте"))
-async def cmd_who_are_you(message: Message, bot: Bot, **kw):
+                    usage="кто ты [ссылка]", desc="Информация о пользователе или боте"))
+async def cmd_who_are_you(message: Message, bot: Bot, args: str = "", **kw):
+    from core_resolve import real_reply
+    if args or real_reply(message) is not None:
+        uid, name, _ = await resolve_target(message, args, bot)
+        if uid:
+            return await message.reply(await render_card(message, bot, uid, name),
+                                       disable_web_page_preview=True)
     from h_botinfo import bot_status_text
     await message.reply(await bot_status_text(bot), disable_web_page_preview=True)
 

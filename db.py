@@ -243,6 +243,52 @@ CREATE TABLE IF NOT EXISTS first_seen (
 CREATE TABLE IF NOT EXISTS vip (
     user_id INTEGER PRIMARY KEY, until INTEGER, level INTEGER DEFAULT 1);
 
+CREATE TABLE IF NOT EXISTS vip_settings (
+    user_id INTEGER PRIMARY KEY,
+    color_theme TEXT NOT NULL DEFAULT 'default'
+);
+
+CREATE TABLE IF NOT EXISTS relationships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user1_id INTEGER NOT NULL,
+    user2_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    xp INTEGER NOT NULL DEFAULT 0,
+    level INTEGER NOT NULL DEFAULT 1,
+    offended_by INTEGER DEFAULT NULL,
+    soothe_points INTEGER NOT NULL DEFAULT 0,
+    soothe_last_ts INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user1_id, user2_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rel_u1 ON relationships(user1_id);
+CREATE INDEX IF NOT EXISTS idx_rel_u2 ON relationships(user2_id);
+
+CREATE TABLE IF NOT EXISTS relationship_cooldowns (
+    rel_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    action_key TEXT NOT NULL,
+    last_ts INTEGER NOT NULL,
+    PRIMARY KEY (rel_id, user_id, action_key)
+);
+
+CREATE TABLE IF NOT EXISTS relationship_property (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rel_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    price INTEGER NOT NULL DEFAULT 0,
+    bought_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS relationship_children (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rel_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    gender TEXT NOT NULL,
+    born_at INTEGER NOT NULL,
+    care_last_ts INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS spam_base (
     user_id INTEGER PRIMARY KEY, reason TEXT, by_id INTEGER, ts INTEGER);
 
@@ -493,3 +539,167 @@ async def add_grams(user_id: int, amount: int, action: str = "",
             (user_id, action, amount, meta, int(_t.time())))
     row = await fetchone("SELECT grams FROM users WHERE user_id=?", (user_id,))
     return int(row["grams"]) if row else 0
+
+
+# --- VIP & VIP+ -----------------------------------------------------------
+async def get_vip_info(user_id: int) -> tuple[int, int, bool]:
+    """Возвращает (level, until, is_active). Level: 1 = VIP, 2 = VIP+."""
+    row = await fetchone("SELECT until, level FROM vip WHERE user_id=?", (user_id,))
+    if not row:
+        return 0, 0, False
+    lvl = row["level"] or 1
+    until = row["until"] or 0
+    active = until > time.time()
+    return lvl if active else 0, until, active
+
+
+async def set_vip(user_id: int, until: int, level: int = 1) -> None:
+    await execute(
+        "INSERT INTO vip (user_id, until, level) VALUES (?,?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET until=excluded.until, level=excluded.level",
+        (user_id, until, level))
+
+
+async def remove_vip(user_id: int) -> None:
+    await execute("DELETE FROM vip WHERE user_id=?", (user_id,))
+
+
+async def get_vip_theme(user_id: int) -> str:
+    row = await fetchone("SELECT color_theme FROM vip_settings WHERE user_id=?", (user_id,))
+    return row["color_theme"] if row else "default"
+
+
+async def set_vip_theme(user_id: int, theme: str) -> None:
+    await execute(
+        "INSERT INTO vip_settings (user_id, color_theme) VALUES (?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET color_theme=excluded.color_theme",
+        (user_id, theme))
+
+
+# --- Отношения (ОТН) -------------------------------------------------------
+REL_LEVELS = {
+    1: 0,
+    2: 50,
+    3: 150,
+    4: 350,
+    5: 700,
+    6: 1500,
+    7: 3000,
+    8: 6000,
+}
+
+
+def calc_rel_level(xp: int) -> int:
+    lvl = 1
+    for l, req in sorted(REL_LEVELS.items()):
+        if xp >= req:
+            lvl = l
+    return lvl
+
+
+async def get_relationship(user_id: int) -> dict | None:
+    """Возвращает запись отношений, где пользователь является участником."""
+    return await fetchone(
+        "SELECT * FROM relationships WHERE user1_id=? OR user2_id=?",
+        (user_id, user_id))
+
+
+async def get_rel_by_id(rel_id: int) -> dict | None:
+    return await fetchone("SELECT * FROM relationships WHERE id=?", (rel_id,))
+
+
+async def create_relationship(u1: int, u2: int) -> int:
+    ts = int(time.time())
+    await execute(
+        "INSERT INTO relationships (user1_id, user2_id, created_at, xp, level) "
+        "VALUES (?,?,?,0,1)", (u1, u2, ts))
+    await execute("UPDATE users SET married_to=?, married_at=? WHERE user_id=?", (u2, ts, u1))
+    await execute("UPDATE users SET married_to=?, married_at=? WHERE user_id=?", (u1, ts, u2))
+    row = await fetchone("SELECT last_insert_rowid() id")
+    return int(row["id"]) if row else 0
+
+
+async def delete_relationship(rel_id: int) -> None:
+    rel = await get_rel_by_id(rel_id)
+    if rel:
+        await execute("UPDATE users SET married_to=NULL, married_at=NULL WHERE user_id IN (?,?)",
+                      (rel["user1_id"], rel["user2_id"]))
+    await execute("DELETE FROM relationships WHERE id=?", (rel_id,))
+    await execute("DELETE FROM relationship_cooldowns WHERE rel_id=?", (rel_id,))
+    await execute("DELETE FROM relationship_property WHERE rel_id=?", (rel_id,))
+    await execute("DELETE FROM relationship_children WHERE rel_id=?", (rel_id,))
+
+
+async def add_rel_xp(rel_id: int, amount: int) -> tuple[int, int, bool]:
+    """Добавляет XP и возвращает (new_xp, new_level, is_level_up)."""
+    rel = await get_rel_by_id(rel_id)
+    if not rel:
+        return 0, 1, False
+    old_lvl = rel["level"]
+    new_xp = rel["xp"] + amount
+    new_lvl = calc_rel_level(new_xp)
+    await execute("UPDATE relationships SET xp=?, level=? WHERE id=?",
+                  (new_xp, new_lvl, rel_id))
+    return new_xp, new_lvl, (new_lvl > old_lvl)
+
+
+async def set_rel_offended(rel_id: int, offended_by: int | None) -> None:
+    await execute(
+        "UPDATE relationships SET offended_by=?, soothe_points=0, soothe_last_ts=0 WHERE id=?",
+        (offended_by, rel_id))
+
+
+async def soothe_rel(rel_id: int, points: int) -> tuple[int, bool]:
+    """Добавляет очки задабривания. Возвращает (всего_очков, снята_ли_обида)."""
+    rel = await get_rel_by_id(rel_id)
+    if not rel:
+        return 0, False
+    total = rel["soothe_points"] + points
+    now = int(time.time())
+    if total >= 100:
+        await execute(
+            "UPDATE relationships SET offended_by=NULL, soothe_points=0, soothe_last_ts=? WHERE id=?",
+            (now, rel_id))
+        return total, True
+    await execute(
+        "UPDATE relationships SET soothe_points=?, soothe_last_ts=? WHERE id=?",
+        (total, now, rel_id))
+    return total, False
+
+
+async def get_rel_cooldown_left(rel_id: int, user_id: int, action_key: str, period: int) -> int:
+    row = await fetchone(
+        "SELECT last_ts FROM relationship_cooldowns WHERE rel_id=? AND user_id=? AND action_key=?",
+        (rel_id, user_id, action_key))
+    if not row:
+        return 0
+    left = int(row["last_ts"]) + period - int(time.time())
+    return max(0, left)
+
+
+async def set_rel_cooldown(rel_id: int, user_id: int, action_key: str) -> None:
+    await execute(
+        "INSERT INTO relationship_cooldowns (rel_id, user_id, action_key, last_ts) VALUES (?,?,?,?) "
+        "ON CONFLICT(rel_id, user_id, action_key) DO UPDATE SET last_ts=excluded.last_ts",
+        (rel_id, user_id, action_key, int(time.time())))
+
+
+async def get_rel_properties(rel_id: int) -> list[dict]:
+    return await fetchall("SELECT * FROM relationship_property WHERE rel_id=? ORDER BY price ASC", (rel_id,))
+
+
+async def add_rel_property(rel_id: int, item_key: str, item_name: str, price: int) -> None:
+    await execute(
+        "INSERT INTO relationship_property (rel_id, item_key, item_name, price, bought_at) "
+        "VALUES (?,?,?,?,?)", (rel_id, item_key, item_name, price, int(time.time())))
+
+
+async def get_rel_children(rel_id: int) -> list[dict]:
+    return await fetchall("SELECT * FROM relationship_children WHERE rel_id=? ORDER BY id ASC", (rel_id,))
+
+
+async def add_rel_child(rel_id: int, name: str, gender: str) -> None:
+    await execute(
+        "INSERT INTO relationship_children (rel_id, name, gender, born_at, care_last_ts) "
+        "VALUES (?,?,?,?,?)", (rel_id, name, gender, int(time.time()), int(time.time())))
+

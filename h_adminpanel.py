@@ -787,3 +787,60 @@ async def cb_panel(call: CallbackQuery, bot: Bot):
         return await call.answer()
 
     await call.answer()
+
+
+# ═══════════════ СПИСОК ВСЕХ ЧАТОВ БОТА ═══════════════
+@router.message(Cmd("чаты", "мои чаты", "список чатов", "chats", section=S,
+                    usage="чаты", desc="Список всех чатов бота со ссылками на вход (создатель)"))
+async def cmd_chats(message: Message, bot: Bot, **kw):
+    from config import OWNER_ID
+    if message.from_user.id != OWNER_ID and not await is_staff(message.from_user.id):
+        return await message.reply("🔒 Эта команда доступна только создателю бота в личных сообщениях.")
+
+    chats = await db.fetchall("SELECT * FROM chats ORDER BY added_at DESC")
+    if not chats:
+        return await message.reply("📋 Бот пока не добавлен ни в один чат.")
+
+    lines = [f"📋 <b>Чаты, в которых состоит бот ({len(chats)}):</b>\n"]
+    buttons = []
+
+    for i, c in enumerate(chats, 1):
+        cid = c["chat_id"]
+        title = c["title"] or f"Чат {cid}"
+        members_cnt = "—"
+        link = None
+        try:
+            tg_chat = await bot.get_chat(cid)
+            title = tg_chat.title or title
+            if tg_chat.username:
+                link = f"https://t.me/{tg_chat.username}"
+            else:
+                try:
+                    inv = await bot.create_chat_invite_link(cid, name="Владелец бота", creates_join_request=False)
+                    link = inv.invite_link
+                except Exception:
+                    try:
+                        link = await bot.export_chat_invite_link(cid)
+                    except Exception:
+                        cid_str = str(cid)
+                        short_id = cid_str[4:] if cid_str.startswith("-100") else cid_str.lstrip("-")
+                        link = f"https://t.me/c/{short_id}/1"
+            try:
+                cnt = await bot.get_chat_member_count(cid)
+                members_cnt = str(cnt)
+            except Exception:
+                pass
+        except Exception:
+            cid_str = str(cid)
+            short_id = cid_str[4:] if cid_str.startswith("-100") else cid_str.lstrip("-")
+            link = f"https://t.me/c/{short_id}/1"
+
+        lines.append(f"{i}. 💬 <b>{html.escape(title)}</b>\n   • ID: <code>{cid}</code> · 👥 Участников: <b>{members_cnt}</b>")
+        if link:
+            btn_title = title[:24] + "…" if len(title) > 24 else title
+            buttons.append([InlineKeyboardButton(text=f"🔗 {i}. {btn_title}", url=link)])
+
+    lines.append("\n👉 <i>Нажмите на кнопку с чатом ниже, чтобы перейти в него или читать сообщения:</i>")
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await message.reply("\n".join(lines), reply_markup=kb, disable_web_page_preview=True)
+

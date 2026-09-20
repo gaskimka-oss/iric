@@ -144,75 +144,26 @@ async def circle_rand(message: Message, **kw):
     await message.answer_video_note(row["text"])
 
 
-# ================= 20. БРАКИ =================
-@router.message(Cmd("брак", "жениться", "предложение", "marry", section=S_MARRY,
-                    usage="брак {ссылка}", desc="Сделать предложение"))
-async def marry(message: Message, bot: Bot, args: str = "", **kw):
-    uid, name, _ = await resolve_target(message, args, bot)
-    if not uid:
-        return await message.reply("Ответьте реплаем на избранника: <code>брак</code>")
-    if uid == message.from_user.id:
-        return await message.reply("Так нельзя 🙂")
-    me = await db.get_user(message.from_user.id)
-    other = await db.get_user(uid)
-    if me["married_to"]:
-        return await message.reply("Вы уже в браке. Сначала <code>развод</code>.")
-    if other["married_to"]:
-        return await message.reply("Избранник уже в браке 💔")
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="💍 Согласен(на)", callback_data=f"mr:ok:{message.from_user.id}:{uid}"),
-        InlineKeyboardButton(text="💔 Отказ", callback_data=f"mr:no:{message.from_user.id}:{uid}")]])
-    await message.reply(f"💍 {mention(message.from_user)} делает предложение "
-                        f"{mention_id(uid, name)}!", reply_markup=kb)
-
-
-@router.callback_query(F.data.startswith("mr:"))
-async def cb_marry(call: CallbackQuery):
-    _, act, a, b = call.data.split(":")
-    a, b = int(a), int(b)
-    if call.from_user.id != b:
-        return await call.answer("Предложение не вам", show_alert=True)
-    if act == "no":
-        await call.message.edit_text("💔 Предложение отклонено.")
-        return await call.answer()
-    ts = int(time.time())
-    await db.execute("UPDATE users SET married_to=?, married_at=? WHERE user_id=?", (b, ts, a))
-    await db.execute("UPDATE users SET married_to=?, married_at=? WHERE user_id=?", (a, ts, b))
-    ua, ub = await db.get_user(a), await db.get_user(b)
-    await call.message.edit_text(f"🎉 {mention_id(a, ua['first_name'])} и "
-                                 f"{mention_id(b, ub['first_name'])} теперь в браке! 💍")
-    await call.answer()
-
-
-@router.message(Cmd("развод", "развестись", "divorce", section=S_MARRY, usage="развод",
-                    desc="Расторгнуть брак"))
-async def divorce(message: Message, **kw):
-    u = await db.get_user(message.from_user.id)
-    if not u["married_to"]:
-        return await message.reply("Вы не в браке.")
-    p = await db.get_user(u["married_to"])
-    await db.execute("UPDATE users SET married_to=NULL, married_at=NULL WHERE user_id IN (?,?)",
-                     (message.from_user.id, u["married_to"]))
-    await message.reply(f"💔 {mention(message.from_user)} развёлся(лась) с "
-                        f"{mention_id(p['user_id'], p['first_name'])}.")
-
-
-@router.message(Cmd("браки", "топ браков", "свадьбы", section=S_MARRY, usage="браки",
-                    desc="Список браков чата"))
+# ================= 20. БРАКИ И ОТНОШЕНИЯ =================
+@router.message(Cmd("браки", "топ браков", "свадьбы", "топ отн", section=S_MARRY, usage="браки",
+                    desc="Список браков и отношений"))
 async def marry_list(message: Message, **kw):
     rows = await db.fetchall(
-        "SELECT user_id, first_name, married_to, married_at FROM users "
-        "WHERE married_to IS NOT NULL ORDER BY married_at LIMIT 40")
-    seen, lines = set(), []
-    for r in rows:
-        if r["user_id"] in seen:
-            continue
-        seen.add(r["user_id"]); seen.add(r["married_to"])
-        p = await db.get_user(r["married_to"])
-        days = int((time.time() - (r["married_at"] or time.time())) // 86400)
-        lines.append(f"💍 {mention_id(r['user_id'], r['first_name'])} + "
-                     f"{mention_id(p['user_id'], p['first_name'])} — {days} дн.")
-    await message.reply("💒 <b>Браки</b>\n" + ("\n".join(lines) or "Пока никто не женат."))
+        "SELECT r.*, u1.first_name as n1, u2.first_name as n2 "
+        "FROM relationships r "
+        "LEFT JOIN users u1 ON u1.user_id = r.user1_id "
+        "LEFT JOIN users u2 ON u2.user_id = r.user2_id "
+        "ORDER BY r.xp DESC LIMIT 20")
+    if not rows:
+        return await message.reply("💒 <b>Браки и отношения</b>\n\nПока никто не состоит в отношениях.")
+    lines = []
+    for i, r in enumerate(rows, 1):
+        days = max(1, int((time.time() - r["created_at"]) // 86400))
+        lines.append(f"{i}. 💍 {mention_id(r['user1_id'], r['n1'] or str(r['user1_id']))} + "
+                     f"{mention_id(r['user2_id'], r['n2'] or str(r['user2_id']))} — "
+                     f"Ур. {r['level']} (✨ {r['xp']} любви, {days} дн.)")
+    await message.reply("💒 <b>Топ отношений</b>\n\n" + "\n".join(lines))
+
 
 
 # ================= 21. РЕПУТАЦИЯ =================
