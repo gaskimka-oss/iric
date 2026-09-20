@@ -127,15 +127,20 @@ async def cmd_updates(message: Message, **kw):
 
 async def announce_update_on_startup(bot: Bot) -> None:
     """Одноразово рассылает анонс обновления в чаты при первом запуске новой версии."""
-    marker = "update_announced_20_09_2026_v1"
+    marker = "update_announced_20_09_2026_sms_v3"
     if await db.get_setting(0, marker, "") == "1":
         return
     await db.set_setting(0, marker, "1")
 
     from core_seed import MAIN_CHAT
+    from h_chatset import get_sms_topic
+    sms_tid = await get_sms_topic(MAIN_CHAT)
     try:
-        await bot.send_message(MAIN_CHAT, UPDATE_TEXT, disable_web_page_preview=True)
-        log.info("Анонс обновления отправлен в MAIN_CHAT (%s)", MAIN_CHAT)
+        if sms_tid:
+            await bot.send_message(MAIN_CHAT, UPDATE_TEXT, message_thread_id=sms_tid, disable_web_page_preview=True)
+        else:
+            await bot.send_message(MAIN_CHAT, UPDATE_TEXT, disable_web_page_preview=True)
+        log.info("Анонс обновления отправлен в MAIN_CHAT (%s, topic=%s)", MAIN_CHAT, sms_tid)
     except Exception as e:
         log.warning("Не удалось отправить анонс в MAIN_CHAT: %s", e)
 
@@ -145,7 +150,11 @@ async def announce_update_on_startup(bot: Bot) -> None:
             cid = ch["chat_id"]
             if cid != MAIN_CHAT and cid < 0:
                 try:
-                    await bot.send_message(cid, UPDATE_TEXT, disable_web_page_preview=True)
+                    tid = await get_sms_topic(cid)
+                    if tid:
+                        await bot.send_message(cid, UPDATE_TEXT, message_thread_id=tid, disable_web_page_preview=True)
+                    else:
+                        await bot.send_message(cid, UPDATE_TEXT, disable_web_page_preview=True)
                     await asyncio.sleep(0.15)
                 except Exception:
                     pass
@@ -163,18 +172,23 @@ async def cmd_broadcast_updates(message: Message, bot: Bot, **kw):
     chats = await db.fetchall("SELECT chat_id FROM chats WHERE is_active=1")
     target_ids = set()
     from core_seed import MAIN_CHAT
+    from h_chatset import get_sms_topic
     target_ids.add(MAIN_CHAT)
     for ch in chats:
         if ch["chat_id"] < 0:
             target_ids.add(ch["chat_id"])
     for cid in target_ids:
         try:
-            await bot.send_message(cid, UPDATE_TEXT, disable_web_page_preview=True)
+            tid = await get_sms_topic(cid)
+            if tid:
+                await bot.send_message(cid, UPDATE_TEXT, message_thread_id=tid, disable_web_page_preview=True)
+            else:
+                await bot.send_message(cid, UPDATE_TEXT, disable_web_page_preview=True)
             sent += 1
             await asyncio.sleep(0.1)
         except Exception:
             pass
-    await m.edit_text(f"✅ Анонс обновления успешно отправлен в {sent} чат(ов)!")
+    await m.edit_text(f"✅ Анонс обновления успешно отправлен в {sent} чат(ов) в тему СМС!")
 
 
 # ---------------- ХРАНИЛИЩЕ И РЕЗЕРВНЫЕ КОПИИ ----------------

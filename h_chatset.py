@@ -335,6 +335,29 @@ async def net_add(message: Message, bot: Bot, **kw):
     await message.reply(f"🕸 Чат добавлен в сетку под номером <b>{row['n']}</b>")
 
 
+async def get_sms_topic(chat_id: int) -> int:
+    v = await db.get_setting(chat_id, "sms_topic", "0")
+    try:
+        return int(v)
+    except Exception:
+        return 0
+
+
+@router.message(Cmd("тема смс", "тема общения", "тема чата", "тема анонсов", section=S_TOPIC, rank=1,
+                    usage="тема смс", desc="Привязать текущую тему для СМС, общения и анонсов"))
+async def cmd_set_sms_topic(message: Message, bot: Bot, args: str = "", **kw):
+    if not await require(message, bot, 1):
+        return
+    here = int(getattr(message, "message_thread_id", None) or 0)
+    if not here:
+        return await message.reply("⚠️ Напишите эту команду внутри темы «СМС», чтобы привязать её.")
+    await db.set_setting(message.chat.id, "sms_topic", str(here))
+    await message.reply(
+        f"✅ <b>Тема «СМС» успешно установлена!</b>\n"
+        f"ID темы: <code>{here}</code>\n"
+        f"Теперь все анонсы, обновления и общие уведомления будут отправляться в эту тему.")
+
+
 # ================= 10. ТЕМЫ МОДЕРАТОРОВ =================
 @router.message(Cmd("тема", "темы", section=S_TOPIC, rank=1, usage="тема",
                     desc="Что настроено в этой теме"))
@@ -354,6 +377,7 @@ async def topic(message: Message, bot: Bot, args: str = "", **kw):
     from h_grams import get_gram_topic
     form_t = await get_form_topic(message.chat.id)
     gram_t = await get_gram_topic(message.chat.id)
+    sms_t = await get_sms_topic(message.chat.id)
 
     if args:
         # старое поведение: подписать текущую тему вручную
@@ -376,6 +400,11 @@ async def topic(message: Message, bot: Bot, args: str = "", **kw):
             "Баланс: <code>б</code> · Игры: <code>игры</code>\n"
             "Бонус: <code>бонус граммы</code>")
 
+    if here and here == sms_t:
+        return await message.reply(
+            "💬 <b>Эта тема: СМС и основное общение</b>\n\n"
+            "Здесь проходит основная переписка участников, публикуются новости и анонсы обновлений.")
+
     # прочие темы — показываем подпись и общую карту настроек
     note = await db.get_setting(message.chat.id, f"topic_note:{here}", "")
     if not note and not here:
@@ -386,6 +415,8 @@ async def topic(message: Message, bot: Bot, args: str = "", **kw):
         lines.append(f"Подпись: <b>{html.escape(note)}</b>")
     lines.append("")
     lines.append("<b>Настроенные темы чата:</b>")
+    lines.append(f"💬 СМС: "
+                 + (topic_link(message.chat.id, sms_t) if sms_t else "не задана (напишите <code>тема смс</code>)"))
     lines.append(f"📝 Описания: "
                  + (topic_link(message.chat.id, form_t) if form_t else "не задана"))
     lines.append(f"💊 Граммы: "

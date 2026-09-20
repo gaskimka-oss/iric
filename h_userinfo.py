@@ -381,6 +381,9 @@ async def cmd_description(message: Message, bot: Bot, args: str = "", **kw):
             a.splitlines()[0].strip() or "x"):
         return await _save_form(message, a)
 
+    if a.lower() in {"лист", "список", "все", "list"}:
+        return await cmd_desc_list(message, bot)
+
     # «описание» без указания на кого — всегда СВОЁ описание.
     # Чужое показываем, только если явно указан @ник / ссылка / id
     # либо это настоящий ответ на чужое сообщение.
@@ -970,17 +973,15 @@ async def cmd_nick_list(message: Message, bot: Bot, args: str = "", **kw):
     await message.reply("\n".join(out)[:3900], disable_web_page_preview=True)
 
 
-@router.message(Cmd("описаниялист", "описания лист", "список описаний",
-                    "кто заполнил", "лист описаний", section=S, rank=1,
-                    usage="описаниялист", desc="У кого есть описание (ранг 1+)"))
+@router.message(Cmd("описание лист", "описания лист", "описаниялист", "описаниелист",
+                    "список описаний", "список анкет", "анкеты лист", "анкета лист",
+                    "все описания", "все анкеты", "кто заполнил", "лист описаний", "лист анкет",
+                    section=S, usage="описание лист", desc="Список участников с анкетами/описаниями"))
 async def cmd_desc_list(message: Message, bot: Bot, args: str = "", **kw):
-    from core_ranks import require
-    if not await require(message, bot, 1):
-        return
-
     rows = await db.fetchall(
-        "SELECT p.*, u.username, u.first_name FROM profiles p "
-        "LEFT JOIN users u ON u.user_id=p.user_id")
+        "SELECT p.*, u.username, u.first_name, u.nick FROM profiles p "
+        "LEFT JOIN users u ON u.user_id=p.user_id "
+        "ORDER BY p.filled_ts DESC, p.user_id ASC")
 
     done, empty = [], []
     for r in rows:
@@ -988,27 +989,32 @@ async def cmd_desc_list(message: Message, bot: Bot, args: str = "", **kw):
                    or sum(1 for _, _, c in FIELDS if r[c]) >= MIN_FIELDS)
         (done if has else empty).append(r)
 
-    def line(r):
-        nm = r["first_name"] or (f"@{r['username']}" if r["username"]
-                                 else str(r["user_id"]))
-        return f"• {mention_id(r['user_id'], html.escape(nm))}"
-
     total = await db.fetchone("SELECT COUNT(*) c FROM users")
-    out = [f"📝 <b>Описания</b>\n",
-           f"✅ Заполнили: <b>{len(done)}</b>",
-           f"❌ Без описания: <b>{len(empty)}</b>",
-           f"👥 Всего в базе: <b>{total['c']}</b>\n"]
+    out = [
+        f"📝 <b>Список описаний (анкет участников)</b>\n",
+        f"✅ Заполнили описание: <b>{len(done)}</b>",
+        f"❌ Без описания: <b>{len(empty)}</b>",
+        f"👥 Всего в базе: <b>{total['c']}</b>\n",
+    ]
 
-    if done:
-        out.append("<b>✅ С описанием:</b>")
-        out += [line(r) for r in done[:30]]
+    if not done:
+        out.append("<i>Пока никто не заполнил описание.</i>\nЗаполнить: напишите <code>шаблон</code>")
+    else:
+        out.append("<b>📋 Заполненные анкеты:</b>")
+        for idx, r in enumerate(done[:30], 1):
+            nm = r["real_name"] or r["nick"] or r["first_name"] or (f"@{r['username']}" if r["username"] else str(r["user_id"]))
+            details = []
+            if r["age"]:
+                details.append(f"{r['age']} лет")
+            if r["country"]:
+                details.append(r["country"])
+            if r["hobby"]:
+                details.append(f"ник: {r['hobby']}")
+            det_str = f" ({', '.join(details)})" if details else ""
+            out.append(f"<b>{idx}.</b> {mention_id(r['user_id'], html.escape(nm))}{html.escape(det_str)}")
+
         if len(done) > 30:
-            out.append(f"<i>…и ещё {len(done) - 30}</i>")
-    if empty:
-        out.append("\n<b>❌ Без описания:</b>")
-        out += [line(r) for r in empty[:20]]
-        if len(empty) > 20:
-            out.append(f"<i>…и ещё {len(empty) - 20}</i>")
+            out.append(f"<i>…и ещё {len(done) - 30} анкет</i>")
 
-    out.append("\n<i>Подробнее — админ-панель → 📝 Описания участников</i>")
+    out.append("\n💡 <i>Чтобы посмотреть полное описание участника — напишите «описание @юзер»</i>")
     await message.reply("\n".join(out)[:3900], disable_web_page_preview=True)

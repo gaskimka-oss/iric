@@ -488,6 +488,18 @@ async def activity(message: Message, bot: Bot):
                 return
     await db.add_xp(uid, XP_PER_MESSAGE)
     if message.chat.type != "private":
+        # Автоматическое запоминание активной темы общения, если sms_topic ещё не задан
+        tid = int(getattr(message, "message_thread_id", None) or 0)
+        if tid and tid > 1:
+            cur_sms = await db.get_setting(message.chat.id, "sms_topic", "0")
+            if cur_sms == "0":
+                from h_userinfo import get_form_topic
+                from h_grams import get_gram_topic
+                ft = await get_form_topic(message.chat.id)
+                gt = await get_gram_topic(message.chat.id)
+                if tid != ft and tid != gt:
+                    await db.set_setting(message.chat.id, "sms_topic", str(tid))
+
         await db.bump_chat_stat(message.chat.id, uid, XP_PER_MESSAGE)
         import time as _t
         await db.execute(
