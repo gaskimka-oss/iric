@@ -389,6 +389,8 @@ async def cmd_warns(message: Message, bot: Bot, args: str = "", **kw):
         if r["admin_id"]:
             a = await db.get_user(r["admin_id"])
             who = f" · 👮 {mention_id(r['admin_id'], a['first_name'])}"
+        else:
+            who = " · 👮 Кузя"
         lines.append(
             f"{i}. {html.escape(r['reason'] or 'без причины')}\n"
             f"   🕒 {time.strftime('%d.%m.%Y %H:%M', time.localtime(r['ts']))}{who}")
@@ -436,11 +438,12 @@ async def cmd_punish_info(message: Message, bot: Bot, args: str = "", **kw):
         return await message.reply("Наказание с таким номером не найдено.")
     u = await db.get_user(r["user_id"])
     by = await db.get_user(r["by_id"]) if r["by_id"] else None
+    by_str = mention_id(r["by_id"], by["first_name"]) if by else "Кузя"
     await message.reply(
         f"📋 <b>Наказание #{r['id']}</b>\n"
         f"Тип: <b>{KIND_NAMES.get(r['kind'], r['kind'])}</b>\n"
         f"👤 Кому: {mention_id(r['user_id'], u['first_name'])}\n"
-        f"👮 Кем: {mention_id(r['by_id'], by['first_name']) if by else 'система'}\n"
+        f"👮 Кем: {by_str}\n"
         f"📝 Причина: {html.escape(r['reason'] or '—')}\n"
         f"⏱ Срок: {human_period(r['seconds']) if r['seconds'] else 'навсегда/разовое'}\n"
         f"🕒 Выдано: {time.strftime('%d.%m.%Y %H:%M', time.localtime(r['ts']))}\n"
@@ -602,21 +605,24 @@ async def cmd_warn_inactive(message: Message, bot: Bot, args: str = "", **kw):
     warned = 0
     muted = 0
 
-    for r in rows[:100]:
+    for r in rows:
         uid = int(r["user_id"])
         if await get_rank(message.chat.id, uid) > 0:
             continue
+        is_tg_admin = False
         try:
             m = await bot.get_chat_member(message.chat.id, uid)
-            if m.status in {"left", "kicked", "creator", "administrator"}:
-                continue
+            if m.status in {"creator", "administrator"}:
+                is_tg_admin = True
         except Exception:
+            pass
+        if is_tg_admin:
             continue
 
         await db.execute(
             "INSERT INTO warns (chat_id, user_id, admin_id, reason, ts) VALUES (?,?,?,?,?)",
-            (message.chat.id, uid, message.from_user.id, reason, now))
-        await log_punish(message.chat.id, uid, "warn", reason, warn_duration, message.from_user.id)
+            (message.chat.id, uid, 0, reason, now))
+        await log_punish(message.chat.id, uid, "warn", reason, warn_duration, 0)
         warned += 1
 
         w_count = await db.fetchone(
@@ -634,12 +640,13 @@ async def cmd_warn_inactive(message: Message, bot: Bot, args: str = "", **kw):
                 pass
 
     if warned == 0:
-        return await message.reply("Не найдено участников для выдачи варна за неактив.")
+        return await message.reply("Не найдено подходящих участников для выдачи варна за неактив.")
 
     mute_note = f"\n🔇 Автоматически замучено за превышение лимита варнов: <b>{muted}</b>" if muted else ""
     text = (
         f"⚠️ <b>Массовая выдача предупреждений за неактив завершена!</b>\n\n"
         f"👥 Предупреждения получили: <b>{warned}</b> участников\n"
+        f"👮 Выдано от имени: <b>Кузя</b>\n"
         f"⏱ Срок действия варна: <b>30 дней</b>\n"
         f"📝 Причина: <i>Неактив в чате более {human_period(secs)}</i>{mute_note}\n\n"
         f"💬 <b>Обжаловать или снять предупреждение можно у администрации в ЛС.</b>"

@@ -94,16 +94,14 @@ async def cmd_vip_info(message: Message, bot: Bot, **kw):
         f"<b>Возможности VIP:</b>\n"
         f"• 🛠 <b>+50% к награде</b> на команде <code>работа</code> (дополнительные ириски)\n"
         f"• 💖 <b>+25% любви</b> к прокачке отношений в паре (ОТН)\n"
-        f"• 🎨 Доступ к команде <code>вип меню</code> — выбор стиля и цвета оформления\n"
+        f"• 🎨 Выбор стилей оформления доступен в ранге 🌟 VIP+ (<code>вип+ команды</code>)\n"
         f"• ▫️ Отметка ⭐️ VIP в карточке профиля (<code>кто я</code> / <code>кто ты</code>)\n\n"
         f"💡 <b>Команды для использования:</b>\n"
-        f"• <code>вип меню</code> — открыть меню настройки цвета\n"
         f"• <code>вип+ команды</code> — возможности улучшенного ранга VIP+\n"
         f"• <code>купить вип</code> — приобрести VIP на 30 дней за ириски\n"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🎨 VIP Меню (Темы)", callback_data="vip_open_menu"),
             InlineKeyboardButton(text="🛍 Купить VIP", callback_data="buy_vip_menu")
         ]
     ])
@@ -157,9 +155,9 @@ async def cmd_buy_vip_dialog(message: Message, **kw):
         f"🛍 <b>Покупка статусов VIP и VIP+</b>\n\n"
         f"🍬 Ваш баланс: <b>{money(user['balance'])}</b>\n\n"
         f"⭐ <b>VIP на 30 дней:</b> <b>{money(VIP_PRICE)}</b>\n"
-        f"• +50% к работе, +25% к ОТН, доступ к темам\n\n"
+        f"• +50% к работе, +25% к ОТН\n\n"
         f"🌟 <b>VIP+ на 30 дней:</b> <b>{money(VIPPLUS_PRICE)}</b>\n"
-        f"• +100% к работе (удвоение!), +50% к ОТН, элитный статус\n\n"
+        f"• +100% к работе (удвоение!), +50% к ОТН, эксклюзивные темы оформления, элитный статус\n\n"
         f"Выберите статус для покупки на 30 дней:"
     )
     await message.reply(text, reply_markup=buy_vip_keyboard(), disable_web_page_preview=True)
@@ -172,9 +170,9 @@ async def cb_buy_vip_menu(call: CallbackQuery):
         f"🛍 <b>Покупка статусов VIP и VIP+</b>\n\n"
         f"🍬 Ваш баланс: <b>{money(user['balance'])}</b>\n\n"
         f"⭐ <b>VIP на 30 дней:</b> <b>{money(VIP_PRICE)}</b>\n"
-        f"• +50% к работе, +25% к ОТН, доступ к темам\n\n"
+        f"• +50% к работе, +25% к ОТН\n\n"
         f"🌟 <b>VIP+ на 30 дней:</b> <b>{money(VIPPLUS_PRICE)}</b>\n"
-        f"• +100% к работе (удвоение!), +50% к ОТН, элитный статус\n\n"
+        f"• +100% к работе (удвоение!), +50% к ОТН, эксклюзивные темы оформления, элитный статус\n\n"
         f"Выберите статус для покупки на 30 дней:"
     )
     await call.message.edit_text(text, reply_markup=buy_vip_keyboard(), disable_web_page_preview=True)
@@ -203,29 +201,30 @@ async def cb_buy_vip_do(call: CallbackQuery):
 
     await db.set_vip(call.from_user.id, new_until, target_lvl)
 
+    extra_btn = [InlineKeyboardButton(text="🎨 Открыть VIP Меню", callback_data="vip_open_menu")] if target_lvl >= 2 else []
+    kb = InlineKeyboardMarkup(inline_keyboard=[extra_btn]) if extra_btn else None
+
     await call.message.edit_text(
         f"🎉 <b>Поздравляем с приобретением {lvl_name}!</b> 🎉\n\n"
         f"Статус активирован на <b>30 дней</b> (до {time.strftime('%d.%m.%Y', time.localtime(new_until))})!\n\n"
-        f"Вам доступны все бонусы ранга. Настройте тему в <code>вип меню</code>!",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🎨 Открыть VIP Меню", callback_data="vip_open_menu")
-        ]]))
+        f"Вам доступны все бонусы ранга.",
+        reply_markup=kb)
     await call.answer(f"✅ Статус {lvl_name} успешно активирован!", show_alert=True)
 
 
 # ================== VIP МЕНЮ (ТЕМЫ) ==================
 
 @router.message(Cmd("вип меню", "vip menu", "вип темы", section=S_VIP,
-                    usage="вип меню", desc="Выбор цвета и темы оформления VIP"))
+                    usage="вип меню", desc="Выбор цвета и темы оформления VIP+"))
 async def cmd_vip_menu(message: Message, **kw):
     me_id = message.from_user.id
     lvl, until, active = await db.get_vip_info(me_id)
-    if not active:
+    if not active or lvl < 2:
         return await message.reply(
-            "🔒 <b>VIP-меню доступно только владельцам статуса VIP и VIP+!</b>\n\n"
-            "Приобрести статус за ириски: <code>купить вип</code> или <code>купить вип+</code>",
+            "🔒 <b>VIP-меню и выбор тем оформления доступны только для пользователей с активным статусом 🌟 VIP+!</b>\n\n"
+            "Приобрести статус за ириски: <code>купить вип+</code>",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="🛍 Купить VIP", callback_data="buy_vip_menu")
+                InlineKeyboardButton(text="🛍 Купить VIP+", callback_data="buy_vip_menu")
             ]]))
 
     theme = await db.get_vip_theme(me_id)
@@ -240,8 +239,8 @@ async def cmd_vip_menu(message: Message, **kw):
 @router.callback_query(F.data == "vip_open_menu")
 async def cb_vip_open_menu(call: CallbackQuery):
     lvl, until, active = await db.get_vip_info(call.from_user.id)
-    if not active:
-        return await call.answer("🔒 Требуется активный статус VIP или VIP+!", show_alert=True)
+    if not active or lvl < 2:
+        return await call.answer("🔒 Выбор тем доступен только владельцам статуса 🌟 VIP+!\nПриобретите статус: «купить вип+»", show_alert=True)
 
     theme = await db.get_vip_theme(call.from_user.id)
     text = (
@@ -257,8 +256,8 @@ async def cb_vip_open_menu(call: CallbackQuery):
 async def cb_vip_set_theme(call: CallbackQuery):
     theme_key = call.data.split(":")[1]
     lvl, until, active = await db.get_vip_info(call.from_user.id)
-    if not active:
-        return await call.answer("🔒 Требуется активный статус VIP!", show_alert=True)
+    if not active or lvl < 2:
+        return await call.answer("🔒 Темы оформления доступны только для пользователей со статусом 🌟 VIP+!", show_alert=True)
 
     if theme_key not in VIP_THEMES:
         return await call.answer()
@@ -283,15 +282,15 @@ async def cb_vip_close(call: CallbackQuery):
 @router.message(Cmd("выдать вип", "дать вип", "выдать vip", "дать vip",
                     "выдать вип+", "дать вип+", "выдать vip+", "дать vip+",
                     "+вип", "+vip", "+вип+", "+vip+",
-                    section=S_VIP, rank=8,
+                    section=S_VIP, rank=6,
                     usage="выдать вип {ссылка} [срок] [1|2]", desc="Выдать VIP / VIP+"))
 async def cmd_give_vip(message: Message, bot: Bot, args: str = "", **kw):
     import config
     from core_ranks import effective_rank
     have = await effective_rank(message, bot)
     is_admin = bool(message.from_user and (message.from_user.id == config.OWNER_ID or message.from_user.id in config.ADMINS))
-    if have < 8 and not is_admin:
-        return await message.reply("🔒 <b>Выдавать статус VIP могут только создатели и старшая администрация!</b>")
+    if have < 6 and not is_admin:
+        return await message.reply("🔒 <b>Выдавать статус VIP могут только технические администраторы и создатели!</b>")
 
     uid, name, rest = await resolve_target(message, args, bot)
     if not uid:
@@ -330,15 +329,15 @@ async def cmd_give_vip(message: Message, bot: Bot, args: str = "", **kw):
 @router.message(Cmd("снять вип", "забрать вип", "снять vip", "забрать vip",
                     "снять вип+", "забрать вип+", "снять vip+", "забрать vip+",
                     "-вип", "-vip", "-вип+", "-vip+",
-                    section=S_VIP, rank=8,
+                    section=S_VIP, rank=6,
                     usage="снять вип {ссылка}", desc="Снять статус VIP / VIP+"))
 async def cmd_remove_vip(message: Message, bot: Bot, args: str = "", **kw):
     import config
     from core_ranks import effective_rank
     have = await effective_rank(message, bot)
     is_admin = bool(message.from_user and (message.from_user.id == config.OWNER_ID or message.from_user.id in config.ADMINS))
-    if have < 8 and not is_admin:
-        return await message.reply("🔒 <b>Снимать статус VIP могут только создатели и старшая администрация!</b>")
+    if have < 6 and not is_admin:
+        return await message.reply("🔒 <b>Снимать статус VIP могут только технические администраторы и создатели!</b>")
 
     uid, name, _ = await resolve_target(message, args, bot)
     if not uid:

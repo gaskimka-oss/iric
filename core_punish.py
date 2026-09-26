@@ -159,7 +159,7 @@ async def render_list(chat_id: int, kind: str, limit: int = 25) -> str:
     for r in rows:
         who = mention_id(r["user_id"], r["first_name"])
         by = await db.get_user(r["by_id"]) if r["by_id"] else None
-        byname = mention_id(r["by_id"], by["first_name"]) if by else "—"
+        byname = mention_id(r["by_id"], by["first_name"]) if by else "Кузя"
         when = time.strftime("%d.%m %H:%M", time.localtime(r["ts"]))
         line = f"• {who}"
         if r["seconds"]:
@@ -193,7 +193,7 @@ async def render_history(chat_id: int, uid: int, name: str | None,
     out = [head, summary, ""]
     for r in rows:
         by = await db.get_user(r["by_id"]) if r["by_id"] else None
-        byname = mention_id(r["by_id"], by["first_name"]) if by else "—"
+        byname = mention_id(r["by_id"], by["first_name"]) if by else "Кузя"
         when = time.strftime("%d.%m.%Y %H:%M", time.localtime(r["ts"]))
         status = "🟢 активно" if r["active"] else "⚪️ снято"
         dur = human_period(r["seconds"]) if r["seconds"] else (
