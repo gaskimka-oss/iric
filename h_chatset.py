@@ -336,11 +336,17 @@ async def net_add(message: Message, bot: Bot, **kw):
 
 
 async def get_sms_topic(chat_id: int) -> int:
-    v = await db.get_setting(chat_id, "sms_topic", "0")
+    from core_seed import MAIN_CHAT
+    default_val = "4" if (chat_id == MAIN_CHAT or str(chat_id).endswith("3934033202")) else "0"
+    v = await db.get_setting(chat_id, "sms_topic", default_val)
     try:
-        return int(v)
+        val = int(v)
+        if val == 0 and (chat_id == MAIN_CHAT or str(chat_id).endswith("3934033202")):
+            return 4
+        return val
     except Exception:
-        return 0
+        return 4 if (chat_id == MAIN_CHAT or str(chat_id).endswith("3934033202")) else 0
+
 
 
 @router.message(Cmd("тема смс", "тема общения", "тема чата", "тема анонсов", section=S_TOPIC, rank=1,

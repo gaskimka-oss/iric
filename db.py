@@ -289,6 +289,16 @@ CREATE TABLE IF NOT EXISTS relationship_children (
     care_last_ts INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS friends (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user1_id INTEGER NOT NULL,
+    user2_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(user1_id, user2_id)
+);
+CREATE INDEX IF NOT EXISTS idx_friends_u1 ON friends(user1_id);
+CREATE INDEX IF NOT EXISTS idx_friends_u2 ON friends(user2_id);
+
 CREATE TABLE IF NOT EXISTS spam_base (
     user_id INTEGER PRIMARY KEY, reason TEXT, by_id INTEGER, ts INTEGER);
 
@@ -597,11 +607,48 @@ def calc_rel_level(xp: int) -> int:
     return lvl
 
 
-async def get_relationship(user_id: int) -> dict | None:
-    """Возвращает запись отношений, где пользователь является участником."""
-    return await fetchone(
-        "SELECT * FROM relationships WHERE user1_id=? OR user2_id=?",
+async def get_user_relationships(user_id: int) -> list[dict]:
+    """Возвращает все отношения пользователя (отсортированные по ID)."""
+    return await fetchall(
+        "SELECT * FROM relationships WHERE user1_id=? OR user2_id=? ORDER BY id ASC",
         (user_id, user_id))
+
+
+async def get_active_rel_idx(user_id: int) -> int:
+    """Возвращает номер активной пары пользователя (1-based, 1 = основа)."""
+    val = await get_setting(user_id, "active_rel_idx", "1")
+    try:
+        return max(1, int(val))
+    except Exception:
+        return 1
+
+
+async def set_active_rel_idx(user_id: int, idx: int) -> None:
+    """Устанавливает номер активной пары."""
+    await set_setting(user_id, "active_rel_idx", str(max(1, idx)))
+
+
+async def get_relationship(user_id: int, target_idx: int | None = None) -> dict | None:
+    """Возвращает активную пару или пару под номером target_idx (1-based, 1 = основа)."""
+    rels = await get_user_relationships(user_id)
+    if not rels:
+        return None
+    if target_idx is not None and target_idx > 0:
+        if target_idx <= len(rels):
+            return rels[target_idx - 1]
+        return rels[0]
+    cur_idx = await get_active_rel_idx(user_id)
+    if 1 <= cur_idx <= len(rels):
+        return rels[cur_idx - 1]
+    return rels[0]
+
+
+async def are_in_relationship(u1: int, u2: int) -> bool:
+    """Проверяет, есть ли уже союз между двумя конкретными людьми."""
+    row = await fetchone(
+        "SELECT 1 FROM relationships WHERE (user1_id=? AND user2_id=?) OR (user1_id=? AND user2_id=?)",
+        (u1, u2, u2, u1))
+    return bool(row)
 
 
 async def get_rel_by_id(rel_id: int) -> dict | None:
@@ -622,12 +669,22 @@ async def create_relationship(u1: int, u2: int) -> int:
 async def delete_relationship(rel_id: int) -> None:
     rel = await get_rel_by_id(rel_id)
     if rel:
-        await execute("UPDATE users SET married_to=NULL, married_at=NULL WHERE user_id IN (?,?)",
-                      (rel["user1_id"], rel["user2_id"]))
+        u1, u2 = rel["user1_id"], rel["user2_id"]
+        for uid in (u1, u2):
+            other_rels = await get_user_relationships(uid)
+            rem_rels = [r for r in other_rels if r["id"] != rel_id]
+            if rem_rels:
+                next_rel = rem_rels[0]
+                pid = next_rel["user2_id"] if next_rel["user1_id"] == uid else next_rel["user1_id"]
+                await execute("UPDATE users SET married_to=?, married_at=? WHERE user_id=?",
+                              (pid, next_rel["created_at"], uid))
+            else:
+                await execute("UPDATE users SET married_to=NULL, married_at=NULL WHERE user_id=?", (uid,))
     await execute("DELETE FROM relationships WHERE id=?", (rel_id,))
     await execute("DELETE FROM relationship_cooldowns WHERE rel_id=?", (rel_id,))
     await execute("DELETE FROM relationship_property WHERE rel_id=?", (rel_id,))
     await execute("DELETE FROM relationship_children WHERE rel_id=?", (rel_id,))
+
 
 
 async def add_rel_xp(rel_id: int, amount: int) -> tuple[int, int, bool]:
@@ -706,5 +763,48 @@ async def add_rel_child(rel_id: int, name: str, gender: str) -> None:
 
 async def get_all_relationships() -> list[dict]:
     return await fetchall("SELECT * FROM relationships ORDER BY level DESC, xp DESC, id ASC")
+
+
+# ================== ДРУЗЬЯ (ДРУЖЕСКИЕ ОТНОШЕНИЯ) ==================
+
+async def add_friend(u1: int, u2: int) -> bool:
+    """Добавляет двух пользователей в друзья."""
+    u_min, u_max = min(u1, u2), max(u1, u2)
+    now = int(time.time())
+    res = await execute(
+        "INSERT OR IGNORE INTO friends (user1_id, user2_id, created_at) VALUES (?, ?, ?)",
+        (u_min, u_max, now))
+    return bool(res)
+
+
+async def remove_friend(u1: int, u2: int) -> bool:
+    """Удаляет дружбу между двумя пользователями."""
+    u_min, u_max = min(u1, u2), max(u1, u2)
+    res = await execute(
+        "DELETE FROM friends WHERE user1_id=? AND user2_id=?", (u_min, u_max))
+    return bool(res)
+
+
+async def are_friends(u1: int, u2: int) -> bool:
+    """Проверяет, дружат ли пользователи."""
+    u_min, u_max = min(u1, u2), max(u1, u2)
+    row = await fetchone(
+        "SELECT 1 FROM friends WHERE user1_id=? AND user2_id=?", (u_min, u_max))
+    return bool(row)
+
+
+async def get_friends(uid: int) -> list[dict]:
+    """Возвращает список друзей пользователя."""
+    return await fetchall(
+        "SELECT CASE WHEN user1_id=? THEN user2_id ELSE user1_id END AS friend_id, created_at "
+        "FROM friends WHERE user1_id=? OR user2_id=? ORDER BY created_at DESC",
+        (uid, uid, uid))
+
+
+async def count_friends(uid: int) -> int:
+    """Возвращает количество друзей."""
+    row = await fetchone(
+        "SELECT COUNT(*) c FROM friends WHERE user1_id=? OR user2_id=?", (uid, uid))
+    return int(row["c"]) if row else 0
 
 

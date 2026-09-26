@@ -280,25 +280,36 @@ async def cb_vip_close(call: CallbackQuery):
 
 # ---------- Административные команды управления VIP ----------
 
-@router.message(Cmd("выдать вип", "дать вип", section=S_VIP, rank=8,
-                    usage="выдать вип {ссылка} [срок] [1|2]", desc="Выдать VIP (только создатель бота)"))
+@router.message(Cmd("выдать вип", "дать вип", "выдать vip", "дать vip",
+                    "выдать вип+", "дать вип+", "выдать vip+", "дать vip+",
+                    "+вип", "+vip", "+вип+", "+vip+",
+                    section=S_VIP, rank=8,
+                    usage="выдать вип {ссылка} [срок] [1|2]", desc="Выдать VIP / VIP+"))
 async def cmd_give_vip(message: Message, bot: Bot, args: str = "", **kw):
     import config
-    if not message.from_user or message.from_user.id != config.OWNER_ID:
-        return await message.reply("🔒 <b>Выдавать статус VIP может только создатель бота!</b>")
+    from core_ranks import effective_rank
+    have = await effective_rank(message, bot)
+    is_admin = bool(message.from_user and (message.from_user.id == config.OWNER_ID or message.from_user.id in config.ADMINS))
+    if have < 8 and not is_admin:
+        return await message.reply("🔒 <b>Выдавать статус VIP могут только создатели и старшая администрация!</b>")
 
     uid, name, rest = await resolve_target(message, args, bot)
     if not uid:
-        return await message.reply("Укажите пользователя: <code>выдать вип @user 30 дней 2</code>")
+        return await message.reply(
+            "Укажите пользователя: <code>выдать вип @user [срок]</code> или <code>выдать вип+ @user [срок]</code>")
 
-    # Ищем уровень 1 или 2 в аргументах
-    level = 1
+    # Проверяем, была ли вызвана команда с плюсом (VIP+)
+    msg_cmd = (message.text or "").split()[0].lower() if message.text else ""
+    default_lvl = 2 if ("+" in msg_cmd or "vip+" in msg_cmd or "вип+" in msg_cmd) else 1
+
+    level = default_lvl
     parts = rest.split()
     clean_parts = []
     for p in parts:
-        if p in ("1", "vip", "вип"):
+        p_low = p.lower()
+        if p_low in ("1", "vip", "вип"):
             level = 1
-        elif p in ("2", "vip+", "вип+"):
+        elif p_low in ("2", "vip+", "вип+", "плюс", "plus"):
             level = 2
         else:
             clean_parts.append(p)
@@ -316,16 +327,23 @@ async def cmd_give_vip(message: Message, bot: Bot, args: str = "", **kw):
         f"До: {time.strftime('%d.%m.%Y %H:%M', time.localtime(until))}")
 
 
-@router.message(Cmd("снять вип", "забрать вип", section=S_VIP, rank=8,
-                    usage="снять вип {ссылка}", desc="Снять статус VIP (только создатель бота)"))
+@router.message(Cmd("снять вип", "забрать вип", "снять vip", "забрать vip",
+                    "снять вип+", "забрать вип+", "снять vip+", "забрать vip+",
+                    "-вип", "-vip", "-вип+", "-vip+",
+                    section=S_VIP, rank=8,
+                    usage="снять вип {ссылка}", desc="Снять статус VIP / VIP+"))
 async def cmd_remove_vip(message: Message, bot: Bot, args: str = "", **kw):
     import config
-    if not message.from_user or message.from_user.id != config.OWNER_ID:
-        return await message.reply("🔒 <b>Снимать статус VIP может только создатель бота!</b>")
+    from core_ranks import effective_rank
+    have = await effective_rank(message, bot)
+    is_admin = bool(message.from_user and (message.from_user.id == config.OWNER_ID or message.from_user.id in config.ADMINS))
+    if have < 8 and not is_admin:
+        return await message.reply("🔒 <b>Снимать статус VIP могут только создатели и старшая администрация!</b>")
 
     uid, name, _ = await resolve_target(message, args, bot)
     if not uid:
-        return await message.reply("Укажите пользователя.")
+        return await message.reply("Укажите пользователя: <code>снять вип @user</code>")
 
     await db.remove_vip(uid)
     await message.reply(f"⚪️ Статус VIP снят с {mention_id(uid, name)}.")
+

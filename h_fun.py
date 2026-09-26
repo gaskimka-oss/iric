@@ -26,19 +26,33 @@ S_BONUS, S_FUN, S_DUEL, S_CUBE = 13, 14, 15, 16
 
 # ---------- 13. Бонусы, ириски, VIP ----------
 @router.message(Cmd("бонус", "ежедневный бонус", "дейли", "daily", "bonus", section=S_BONUS,
-                    usage="бонус", desc="Ежедневный бонус ирисок"))
+                    usage="бонус", desc="Бонус ирисок (сокращенный КД)"))
 async def cmd_bonus(message: Message, **kw):
     uid = message.from_user.id
-    left = await db.cooldown_left(uid, "daily", DAILY_COOLDOWN)
+    vip_lvl, _, vip_active = await db.get_vip_info(uid)
+    if vip_active:
+        cd = 1800 if vip_lvl >= 2 else 3600  # 30 мин для VIP+, 1 час для VIP
+    else:
+        cd = 7200  # 2 часа обычный кулдаун (вместо 24ч)
+
+    left = await db.cooldown_left(uid, "daily", cd)
     if left:
         return await message.reply(f"⏳ Бонус уже получен. Следующий через <b>{hms(left)}</b>.")
+
     amount = random.randint(*DAILY_BONUS)
-    row = await db.fetchone("SELECT until FROM vip WHERE user_id=?", (uid,))
-    if row and row["until"] > time.time():
-        amount = int(amount * 2)
+    vip_tag = ""
+    if vip_active:
+        if vip_lvl >= 2:
+            amount = int(amount * 3)
+            vip_tag = "\n🌟 <i>Бонус VIP+: x3 награда (КД 30 мин)!</i>"
+        elif vip_lvl >= 1:
+            amount = int(amount * 2)
+            vip_tag = "\n⭐️ <i>Бонус VIP: x2 награда (КД 1 час)!</i>"
+
     bal = await db.add_balance(uid, amount, "daily")
     await db.set_cooldown(uid, "daily")
-    await message.reply(f"🍬 Ежедневный бонус: <b>+{money(amount)}</b>\nБаланс: {money(bal)}")
+    await message.reply(f"🍬 Бонус получен: <b>+{money(amount)}</b>{vip_tag}\nБаланс: {money(bal)}")
+
 
 
 @router.message(Cmd("баланс", "бал", "ириски", "кошелек", "кошелёк", "balance", section=S_BONUS,
@@ -126,6 +140,90 @@ async def cmd_crime(message: Message, **kw):
     fine = min(u["balance"], random.randint(*CRIME_FINE))
     bal = await db.add_balance(uid, -fine, "crime_fail")
     await message.reply(f"🚨 Провал! <b>−{money(fine)}</b>\nБаланс: {money(bal)}")
+
+
+@router.message(Cmd("украсть", "ограбить", "вор", "кража", "rob", "steal", "грабеж", "грабёж",
+                    section=S_BONUS, usage="украсть {ссылка} [сумма]",
+                    desc="Попробовать украсть деньги у игрока"))
+async def cmd_rob(message: Message, bot: Bot, args: str = "", **kw):
+    robber_id = message.from_user.id
+    uid, name, rest = await resolve_target(message, args, bot)
+    if not uid:
+        return await message.reply(
+            "🦹‍♂️ <b>Ограбление игрока</b>\n\n"
+            "Формат: <code>украсть @юзер [сумма]</code>\n"
+            "Пример: <code>украсть @Dima 500</code>\n\n"
+            "💡 <i>Если ограбление удастся — вы заберёте ириски жертвы.\n"
+            "Если провалится — вы заплатите штраф и компенсацию жертве!</i>")
+
+    if uid == robber_id:
+        return await message.reply("Себя ограбить нельзя 🙂")
+
+    # Кулдаун на ограбления
+    vip_lvl, _, vip_active = await db.get_vip_info(robber_id)
+    cd = 600 if (vip_active and vip_lvl >= 2) else (1200 if (vip_active and vip_lvl >= 1) else 1800)
+    left = await db.cooldown_left(robber_id, "rob_cd", cd)
+    if left:
+        return await message.reply(f"🚨 Полиция ещё ищет вас! Залягте на дно: <b>{hms(left)}</b>.")
+
+    u_robber = await db.get_user(robber_id)
+    u_victim = await db.get_user(uid)
+
+    if u_robber["balance"] < 50:
+        return await message.reply(f"У вас слишком мало ирисок ({money(u_robber['balance'])}). Нужно минимум 50 🪙 на случай штрафа.")
+
+    if u_victim["balance"] < 50:
+        return await message.reply(f"У {mention_id(uid, name)} в карманах пусто (меньше 50 🪙). Красть нечего!")
+
+    # Расчёт суммы
+    max_steal = min(u_victim["balance"], 50000)
+    raw_amount = parse_amount(rest, u_victim["balance"])
+    if raw_amount and raw_amount > 0:
+        amount = min(raw_amount, max_steal)
+    else:
+        # По умолчанию случайная часть (15-30% от баланса жертвы, не более 10000)
+        pct = random.uniform(0.15, 0.30)
+        amount = max(50, min(int(u_victim["balance"] * pct), 10000))
+
+    if amount > u_victim["balance"]:
+        amount = u_victim["balance"]
+
+    # Шанс успеха: базовый 45%, +10% VIP, +20% VIP+
+    chance = 0.45
+    if vip_active:
+        if vip_lvl >= 2:
+            chance += 0.20
+        elif vip_lvl >= 1:
+            chance += 0.10
+
+    # Жертва с VIP имеет защиту
+    v_vip_lvl, _, v_vip_act = await db.get_vip_info(uid)
+    if v_vip_act:
+        chance -= 0.10
+
+    chance = max(0.20, min(0.80, chance))
+    await db.set_cooldown(robber_id, "rob_cd")
+
+    if random.random() < chance:
+        # Успех
+        await db.add_balance(uid, -amount, "robbed_by", str(robber_id))
+        new_bal = await db.add_balance(robber_id, amount, "rob_win", str(uid))
+        await message.reply(
+            f"🦹‍♂️ <b>Успешное ограбление!</b>\n\n"
+            f"{mention(message.from_user)} ловко вытащил из кармана {mention_id(uid, name)} <b>+{money(amount)}</b>! 💰\n\n"
+            f"🎲 Вероятность успеха была: <b>{int(chance * 100)}%</b>\n"
+            f"🍬 Ваш новый баланс: <b>{money(new_bal)}</b>")
+    else:
+        # Провал! Штраф от 50% до 100% от суммы попытки (но не более баланса вора)
+        fine = max(50, min(u_robber["balance"], int(amount * random.uniform(0.5, 1.0))))
+        new_bal = await db.add_balance(robber_id, -fine, "rob_fail", str(uid))
+        await db.add_balance(uid, fine, "rob_comp", str(robber_id))
+        await message.reply(
+            f"🚨 <b>Ограбление провалилось!</b>\n\n"
+            f"{mention(message.from_user)} попался с поличным при попытке ограбить {mention_id(uid, name)}!\n"
+            f"👮‍♂️ Полиция конфисковала и передала жертве компенсацию: <b>−{money(fine)}</b> 💸\n\n"
+            f"🍬 Ваш баланс: <b>{money(new_bal)}</b>")
+
 
 
 @router.message(Cmd("передать", "перевести", "перевод", "дать", "give", section=S_BONUS,
@@ -338,7 +436,7 @@ async def cmd_duel_top(message: Message, **kw):
     await message.reply("⚔️ <b>Топ дуэлянтов</b>\n" + "\n".join(lines))
 
 
-# ---------- 16. Кубы ----------
+# ---------- 16. Кубы и Казино (Рандом игры) ----------
 @router.message(Cmd("куб", "кубик", "кости", "cube", "dice", section=S_CUBE, usage="куб {ставка}",
                     desc="Бросить кубик на ириски"))
 async def cmd_cube(message: Message, args: str = "", **kw):
@@ -365,7 +463,7 @@ async def cmd_cube(message: Message, args: str = "", **kw):
         await message.reply(f"🎲 {p} : {b} — проигрыш −{money(bet)}\nБаланс: {money(u['balance'])}")
 
 
-@router.message(Cmd("казино", "слоты", "казик", "slots", section=S_CUBE, usage="казино {ставка}",
+@router.message(Cmd("слоты", "slots", section=S_CUBE, usage="слоты {ставка}",
                     desc="Игровые слоты"))
 async def cmd_slots(message: Message, args: str = "", **kw):
     bet = await _bet_of(message, args)
@@ -378,10 +476,104 @@ async def cmd_slots(message: Message, args: str = "", **kw):
     mult = 10 if v == 64 else (5 if v in (1, 22, 43) else (2 if v in (4, 8, 12, 16, 32, 48) else 0))
     if mult:
         bal = await db.add_balance(message.from_user.id, bet * mult, "slots_win")
-        await message.reply(f"🎰 Выигрыш x{mult}: <b>+{money(bet*(mult-1))}</b>\nБаланс: {money(bal)}")
+        await message.reply(f"🎰 <b>Выигрыш x{mult}!</b> +{money(bet*(mult-1))}\nБаланс: {money(bal)}")
     else:
         u = await db.get_user(message.from_user.id)
         await message.reply(f"🎰 Мимо. −{money(bet)}\nБаланс: {money(u['balance'])}")
+
+
+@router.message(Cmd("дартс", "darts", section=S_CUBE, usage="дартс {ставка}",
+                    desc="Дартс на ириски"))
+async def cmd_darts(message: Message, args: str = "", **kw):
+    bet = await _bet_of(message, args)
+    if bet is None:
+        return
+    await db.add_balance(message.from_user.id, -bet, "darts_bet")
+    m = await message.answer_dice(emoji="🎯")
+    await asyncio.sleep(3)
+    v = m.dice.value
+    mult = 5 if v == 6 else (2 if v in (4, 5) else (1 if v in (2, 3) else 0))
+    if mult > 1:
+        bal = await db.add_balance(message.from_user.id, bet * mult, "darts_win")
+        tag = "🎯 <b>В ЯБЛОЧКО! x5!</b>" if v == 6 else f"🎯 <b>Точное попадание! x{mult}!</b>"
+        await message.reply(f"{tag} +{money(bet*(mult-1))}\nБаланс: {money(bal)}")
+    elif mult == 1:
+        bal = await db.add_balance(message.from_user.id, bet, "darts_draw")
+        await message.reply(f"🎯 Возврат ставки (x1).\nБаланс: {money(bal)}")
+    else:
+        u = await db.get_user(message.from_user.id)
+        await message.reply(f"🎯 Мимо мишени! −{money(bet)}\nБаланс: {money(u['balance'])}")
+
+
+@router.message(Cmd("боулинг", "кегли", "bowling", section=S_CUBE, usage="боулинг {ставка}",
+                    desc="Боулинг на ириски"))
+async def cmd_bowling(message: Message, args: str = "", **kw):
+    bet = await _bet_of(message, args)
+    if bet is None:
+        return
+    await db.add_balance(message.from_user.id, -bet, "bowling_bet")
+    m = await message.answer_dice(emoji="🎳")
+    await asyncio.sleep(3)
+    v = m.dice.value
+    mult = 4 if v == 6 else (2 if v in (4, 5) else 0)
+    if mult:
+        bal = await db.add_balance(message.from_user.id, bet * mult, "bowling_win")
+        tag = "🎳 <b>СТРАЙК! x4!</b>" if v == 6 else f"🎳 <b>Отличный бросок! x{mult}!</b>"
+        await message.reply(f"{tag} +{money(bet*(mult-1))}\nБаланс: {money(bal)}")
+    else:
+        u = await db.get_user(message.from_user.id)
+        await message.reply(f"🎳 Шар в желобе! −{money(bet)}\nБаланс: {money(u['balance'])}")
+
+
+@router.message(Cmd("футбол", "пенальти", "football", "penalty", section=S_CUBE, usage="футбол {ставка}",
+                    desc="Пенальти на ириски"))
+async def cmd_football(message: Message, args: str = "", **kw):
+    bet = await _bet_of(message, args)
+    if bet is None:
+        return
+    await db.add_balance(message.from_user.id, -bet, "football_bet")
+    m = await message.answer_dice(emoji="⚽")
+    await asyncio.sleep(3)
+    v = m.dice.value
+    if v in (3, 4, 5):
+        win_amount = int(bet * 2.5)
+        bal = await db.add_balance(message.from_user.id, win_amount, "football_win")
+        await message.reply(f"⚽️ <b>ГОООЛ! x2.5!</b> +{money(win_amount - bet)}\nБаланс: {money(bal)}")
+    else:
+        u = await db.get_user(message.from_user.id)
+        await message.reply(f"⚽️ Вратарь отбил мяч! −{money(bet)}\nБаланс: {money(u['balance'])}")
+
+
+@router.message(Cmd("баскетбол", "basketball", section=S_CUBE, usage="баскетбол {ставка}",
+                    desc="Баскетбол на ириски"))
+async def cmd_basketball(message: Message, args: str = "", **kw):
+    bet = await _bet_of(message, args)
+    if bet is None:
+        return
+    await db.add_balance(message.from_user.id, -bet, "basketball_bet")
+    m = await message.answer_dice(emoji="🏀")
+    await asyncio.sleep(3)
+    v = m.dice.value
+    if v in (4, 5):
+        bal = await db.add_balance(message.from_user.id, bet * 3, "basketball_win")
+        await message.reply(f"🏀 <b>Точно в корзину! x3!</b> +{money(bet * 2)}\nБаланс: {money(bal)}")
+    elif v == 3:
+        win_amount = int(bet * 1.5)
+        bal = await db.add_balance(message.from_user.id, win_amount, "basketball_win")
+        await message.reply(f"🏀 <b>Отскок от кольца! x1.5!</b> +{money(win_amount - bet)}\nБаланс: {money(bal)}")
+    else:
+        u = await db.get_user(message.from_user.id)
+        await message.reply(f"🏀 Мимо кольца! −{money(bet)}\nБаланс: {money(u['balance'])}")
+
+
+@router.message(Cmd("казино", "казик", "играть", "casino", section=S_CUBE, usage="казино {ставка}",
+                    desc="Случайная игра казино (слоты, кости, дартс, боулинг, футбол, баскетбол)"))
+async def cmd_casino_random(message: Message, args: str = "", **kw):
+    """Случайная игра казино при вызове «казик» или «казино»."""
+    games = [cmd_slots, cmd_cube, cmd_darts, cmd_bowling, cmd_football, cmd_basketball]
+    chosen_game = random.choice(games)
+    await chosen_game(message, args=args, **kw)
+
 
 
 @router.message(Cmd("рулетка", "roulette", section=S_CUBE, usage="рулетка красное {ставка}",

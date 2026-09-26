@@ -139,7 +139,9 @@ async def cmd_balance(message: Message, bot: Bot, args: str = "", **kw):
     pos = await db.fetchone(
         "SELECT COUNT(*)+1 p FROM users WHERE grams > (SELECT grams FROM users "
         "WHERE user_id=?)", (uid,))
-    left = await db.cooldown_left(uid, "gram_daily", DAILY_CD)
+    vip_lvl, _, vip_active = await db.get_vip_info(uid)
+    cd = 3600 if (vip_active and vip_lvl >= 2) else (7200 if (vip_active and vip_lvl >= 1) else 14400)
+    left = await db.cooldown_left(uid, "gram_daily", cd)
     if left:
         bonus_line = f"🎁 Бонус будет доступен через <b>{hms(left)}</b>"
         kb = None
@@ -163,22 +165,25 @@ async def cmd_balance(message: Message, bot: Bot, args: str = "", **kw):
 
 
 @router.message(Cmd("бонус граммы", "грамм бонус", "ежедневные граммы", section=S,
-                    usage="бонус граммы", desc=f"Ежедневный бонус {DAILY_GRAMS:,} граммов"))
+                    usage="бонус граммы", desc=f"Бонус {DAILY_GRAMS:,} граммов (сокращенный КД)"))
 async def cmd_daily(message: Message, **kw):
     if not await topic_ok(message):
         return
     uid = message.from_user.id
     await _ensure_start(uid)
-    left = await db.cooldown_left(uid, "gram_daily", DAILY_CD)
+    vip_lvl, _, vip_active = await db.get_vip_info(uid)
+    cd = 3600 if (vip_active and vip_lvl >= 2) else (7200 if (vip_active and vip_lvl >= 1) else 14400)
+    left = await db.cooldown_left(uid, "gram_daily", cd)
     if left:
         return await message.reply(
             f"⏳ Бонус уже получен.\nСледующий через <b>{hms(left)}</b>")
     bal = await db.add_grams(uid, DAILY_GRAMS, "gram_daily")
     await db.set_cooldown(uid, "gram_daily")
     await message.reply(
-        f"🎁 <b>Ежедневный бонус!</b>\n"
+        f"🎁 <b>Бонус граммов!</b>\n"
         f"Получено: <b>+{g(DAILY_GRAMS)}</b>\n"
         f"Баланс: <b>{g(bal)}</b>")
+
 
 
 @router.message(Cmd("топ граммов", "топ грамм", "грамм топ", section=S,

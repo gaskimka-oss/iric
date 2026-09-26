@@ -72,6 +72,45 @@ async def apply_for_user(bot: Bot, chat_id: int, user: User) -> int:
                     "until=excluded.until, ts=excluded.ts",
                     (chat_id, user.id, reason, row["by_id"],
                      int(time.time()) + seconds if seconds else 0, int(time.time())))
+            elif kind == "warn":
+                from config import WARN_LIMIT, WARN_MUTE_HOURS
+                from core_ranks import get_rank, rank_label, set_rank
+                target_rank = await get_rank(chat_id, user.id)
+                if target_rank >= 6:
+                    await db.execute("DELETE FROM pending_punishments WHERE id=?", (row["id"],))
+                    continue
+
+                await db.execute(
+                    "INSERT INTO warns (chat_id,user_id,admin_id,reason,ts) VALUES (?,?,?,?,?)",
+                    (chat_id, user.id, row["by_id"], reason, int(time.time())))
+                pid = await log_punish(chat_id, user.id, "warn", reason, 0, row["by_id"])
+                await db.execute("DELETE FROM pending_punishments WHERE id=?", (row["id"],))
+
+                cnt_row = await db.fetchone(
+                    "SELECT COUNT(*) c FROM warns WHERE chat_id=? AND user_id=?",
+                    (chat_id, user.id))
+                limit = int(await db.get_setting(chat_id, "warn_limit", str(WARN_LIMIT)))
+                warn_cnt = cnt_row["c"] if cnt_row else 1
+
+                extra_msg = ""
+                if warn_cnt >= limit:
+                    until = datetime.now(timezone.utc) + timedelta(hours=WARN_MUTE_HOURS)
+                    try:
+                        await bot.restrict_chat_member(chat_id, user.id, MUTE_OFF, until_date=until)
+                        await log_punish(chat_id, user.id, "mute", f"автомут: {limit} предупреждений", WARN_MUTE_HOURS * 3600, 0)
+                        extra_msg = f"\n\n🔇 Лимит достигнут — автомут на {WARN_MUTE_HOURS} ч."
+                    except Exception:
+                        pass
+                    await db.execute("DELETE FROM warns WHERE chat_id=? AND user_id=?", (chat_id, user.id))
+
+                await bot.send_message(
+                    chat_id,
+                    f"⚠️ <b>Предупреждение {warn_cnt}/{limit} применилось автоматически</b>\n"
+                    f"👤 {mention_id(user.id, user.first_name)}\n"
+                    f"📝 Причина: {html.escape(reason)}\n"
+                    f"<code>#{pid}</code>{extra_msg}")
+                done += 1
+                continue
             else:
                 await db.execute("DELETE FROM pending_punishments WHERE id=?", (row["id"],))
                 continue

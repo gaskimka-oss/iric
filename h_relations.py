@@ -96,7 +96,7 @@ def get_other_id(rel: dict, uid: int) -> int:
     return rel["user2_id"] if rel["user1_id"] == uid else rel["user1_id"]
 
 
-async def format_rel_card(rel: dict, bot: Bot) -> str:
+async def format_rel_card(rel: dict, bot: Bot, viewer_id: int | None = None) -> str:
     u1 = await db.get_user(rel["user1_id"])
     u2 = await db.get_user(rel["user2_id"])
     name1 = u1["first_name"] or str(rel["user1_id"])
@@ -140,8 +140,16 @@ async def format_rel_card(rel: dict, bot: Bot) -> str:
     else:
         c_list = "<i>Пока нет детей</i>"
 
+    header_title = "💖 <b>Отношения пары</b> 💖"
+    if viewer_id:
+        user_rels = await db.get_user_relationships(viewer_id)
+        if len(user_rels) > 1:
+            rel_idx = next((i + 1 for i, r in enumerate(user_rels) if r["id"] == rel["id"]), 1)
+            main_tag = " (Основа)" if rel_idx == 1 else ""
+            header_title = f"💖 <b>Отношения пары [Пара #{rel_idx}{main_tag} из {len(user_rels)}]</b> 💖"
+
     text = (
-        f"💖 <b>Отношения пары</b> 💖\n\n"
+        f"{header_title}\n\n"
         f"👩‍❤️‍👨 <b>{mention_id(rel['user1_id'], name1)}</b>  ➕  "
         f"<b>{mention_id(rel['user2_id'], name2)}</b>\n"
         f"▫️ Статус: {status_line}\n"
@@ -150,45 +158,75 @@ async def format_rel_card(rel: dict, bot: Bot) -> str:
         f"{xp_line}\n\n"
         f"🏠 <b>Совместное имущество:</b>\n{prop_str}\n\n"
         f"👶 <b>Дети пары:</b>\n{c_list}\n\n"
-        f"💡 <i>Используйте <code>отн меню</code> для управления парой и прокачки!</i>"
+        f"💡 <i>Используйте <code>отн меню</code> / <code>мой отн 1</code> / <code>мой отн 2</code> для переключения между союзами!</i>"
     )
     return text
 
 
-def rel_main_keyboard(rel_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📜 Доступные действия", callback_data=f"rel_ui:acts:{rel_id}"),
-            InlineKeyboardButton(text="🏠 Имущество", callback_data=f"rel_ui:prop:{rel_id}"),
-        ],
-        [
-            InlineKeyboardButton(text="👶 Дети", callback_data=f"rel_ui:kids:{rel_id}"),
-            InlineKeyboardButton(text="🛍 Магазин пары", callback_data=f"rel_ui:shop:{rel_id}"),
-        ],
-        [
-            InlineKeyboardButton(text="❌ Закрыть", callback_data="rel_ui:close"),
-        ]
+def rel_main_keyboard(rel_id: int, viewer_id: int | None = None, total_rels: int = 1, cur_idx: int = 1) -> InlineKeyboardMarkup:
+    rows = []
+    if viewer_id and total_rels > 1:
+        prev_idx = total_rels if cur_idx <= 1 else cur_idx - 1
+        next_idx = 1 if cur_idx >= total_rels else cur_idx + 1
+        rows.append([
+            InlineKeyboardButton(text="◀️ Пред. пара", callback_data=f"rel_nav:{viewer_id}:{prev_idx}"),
+            InlineKeyboardButton(text=f"Пара {cur_idx}/{total_rels}", callback_data=f"rel_nav_list:{viewer_id}"),
+            InlineKeyboardButton(text="След. пара ▶️", callback_data=f"rel_nav:{viewer_id}:{next_idx}"),
+        ])
+
+    rows.append([
+        InlineKeyboardButton(text="📜 Доступные действия", callback_data=f"rel_ui:acts:{rel_id}"),
+        InlineKeyboardButton(text="🏠 Имущество", callback_data=f"rel_ui:prop:{rel_id}"),
     ])
+    rows.append([
+        InlineKeyboardButton(text="👶 Дети", callback_data=f"rel_ui:kids:{rel_id}"),
+        InlineKeyboardButton(text="🛍 Магазин пары", callback_data=f"rel_ui:shop:{rel_id}"),
+    ])
+    if viewer_id and total_rels > 1:
+        rows.append([
+            InlineKeyboardButton(text="📋 Список всех моих союзов", callback_data=f"rel_nav_list:{viewer_id}")
+        ])
+    rows.append([
+        InlineKeyboardButton(text="❌ Закрыть", callback_data="rel_ui:close"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # ================== КОМАНДЫ ОТНОШЕНИЙ ==================
 
-@router.message(Cmd("отн", "брак", "отношения", "пара", "love", section=S_REL,
-                    usage="отн [@юзер]", desc="Отношения / сделать предложение"))
+@router.message(Cmd("отн", "мой отн", "мои отн", "наши отн", "брак", "мой брак", "наш брак",
+                    "отношения", "мои отношения", "пара", "моя пара", "наша пара", "love",
+                    section=S_REL, usage="отн [@юзер] / мой отн [номер]", desc="Отношения / карточка пары / переключение"))
 async def cmd_rel_main(message: Message, bot: Bot, args: str = "", **kw):
     me_id = message.from_user.id
-    rel = await db.get_relationship(me_id)
+    raw_arg = (args or "").strip().lower()
 
-    # Если есть аргументы или реплай — делаем предложение
+    # Переключение между парами: "мой отн основа", "мой отн 1", "отн 2", и т.д.
+    if raw_arg in ("основа", "основной") or raw_arg.isdigit():
+        idx = 1 if raw_arg in ("основа", "основной") else int(raw_arg)
+        rels = await db.get_user_relationships(me_id)
+        if not rels:
+            return await message.reply(
+                "❌ <b>У вас нет отношений.</b>\nВступите в отношения командой: <code>отн @юзер</code>")
+        if idx < 1 or idx > len(rels):
+            return await message.reply(
+                f"⚠️ У вас зарегистрировано <b>{len(rels)}</b> союзов. Укажите номер от 1 до {len(rels)}: <code>мой отн 1</code>")
+        await db.set_active_rel_idx(me_id, idx)
+        rel = rels[idx - 1]
+        card = await format_rel_card(rel, bot, me_id)
+        kb = rel_main_keyboard(rel["id"], me_id, len(rels), idx)
+        tag = " (Основа)" if idx == 1 else ""
+        return await message.reply(
+            f"🔄 <b>Вы переключились на пару #{idx}{tag}!</b>\n\n" + card,
+            reply_markup=kb, disable_web_page_preview=True)
+
+    # Если указан пользователь (или реплай) — делаем предложение
     uid, name, _ = await resolve_target(message, args, bot)
     if uid:
         if uid == me_id:
             return await message.reply("Нельзя вступить в отношения с самим собой 🙂")
-        if rel:
-            return await message.reply("Вы уже состоите в отношениях! Сначала нужно расторгнуть текущие: <code>развод</code>.")
-        target_rel = await db.get_relationship(uid)
-        if target_rel:
-            return await message.reply(f"💔 {mention_id(uid, name)} уже состоит в отношениях с другим пользователем.")
+        if await db.are_in_relationship(me_id, uid):
+            return await message.reply(f"💍 Вы уже состоите в отношениях с {mention_id(uid, name)}!")
 
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="💍 Согласен(на)", callback_data=f"rel_prop:yes:{me_id}:{uid}"),
@@ -199,8 +237,9 @@ async def cmd_rel_main(message: Message, bot: Bot, args: str = "", **kw):
             f"вступить в отношения!\n\nЧто ответит избранник?",
             reply_markup=kb)
 
-    # Если нет аргументов и нет отношений:
-    if not rel:
+    # Если аргументов нет — выводим активную пару
+    rels = await db.get_user_relationships(me_id)
+    if not rels:
         return await message.reply(
             "❌ <b>У вас нет отношений.</b>\n\n"
             "Вступите в отношения, чтобы открыть возможности пары, совместную прокачку, "
@@ -210,9 +249,14 @@ async def cmd_rel_main(message: Message, bot: Bot, args: str = "", **kw):
             "• Или напишите: <code>отн @username</code>",
             disable_web_page_preview=True)
 
-    # Если отношения есть — выводим карточку
-    card = await format_rel_card(rel, bot)
-    await message.reply(card, reply_markup=rel_main_keyboard(rel["id"]), disable_web_page_preview=True)
+    cur_idx = await db.get_active_rel_idx(me_id)
+    if cur_idx > len(rels):
+        cur_idx = 1
+        await db.set_active_rel_idx(me_id, 1)
+
+    rel = rels[cur_idx - 1]
+    card = await format_rel_card(rel, bot, me_id)
+    await message.reply(card, reply_markup=rel_main_keyboard(rel["id"], me_id, len(rels), cur_idx), disable_web_page_preview=True)
 
 
 @router.message(Cmd("отн список", "список отн", "отношения список", "список отношений",
@@ -264,12 +308,78 @@ async def cmd_relations_list(message: Message, bot: Bot, **kw):
                     usage="отн меню", desc="Интерактивное меню отношений"))
 async def cmd_rel_menu(message: Message, bot: Bot, **kw):
     me_id = message.from_user.id
-    rel = await db.get_relationship(me_id)
-    if not rel:
+    rels = await db.get_user_relationships(me_id)
+    if not rels:
         return await message.reply(
             "❌ <b>У вас нет отношений.</b>\nВступите в отношения командой: <code>отн @юзер</code>")
-    card = await format_rel_card(rel, bot)
-    await message.reply(card, reply_markup=rel_main_keyboard(rel["id"]), disable_web_page_preview=True)
+    cur_idx = await db.get_active_rel_idx(me_id)
+    if cur_idx > len(rels):
+        cur_idx = 1
+        await db.set_active_rel_idx(me_id, 1)
+    rel = rels[cur_idx - 1]
+    card = await format_rel_card(rel, bot, me_id)
+    await message.reply(card, reply_markup=rel_main_keyboard(rel["id"], me_id, len(rels), cur_idx), disable_web_page_preview=True)
+
+
+@router.callback_query(F.data.startswith("rel_nav:"))
+async def cb_rel_nav(call: CallbackQuery, bot: Bot):
+    parts = call.data.split(":")
+    viewer_id = int(parts[1])
+    target_idx = int(parts[2])
+
+    if call.from_user.id != viewer_id:
+        return await call.answer("Это меню принадлежит другому пользователю 🔒", show_alert=True)
+
+    rels = await db.get_user_relationships(viewer_id)
+    if not rels:
+        return await call.answer("У вас нет отношений.", show_alert=True)
+
+    if target_idx < 1 or target_idx > len(rels):
+        target_idx = 1
+
+    await db.set_active_rel_idx(viewer_id, target_idx)
+    rel = rels[target_idx - 1]
+    card = await format_rel_card(rel, bot, viewer_id)
+    kb = rel_main_keyboard(rel["id"], viewer_id, len(rels), target_idx)
+    try:
+        await call.message.edit_text(card, reply_markup=kb, disable_web_page_preview=True)
+    except Exception:
+        pass
+    await call.answer(f"Пара #{target_idx}")
+
+
+@router.callback_query(F.data.startswith("rel_nav_list:"))
+async def cb_rel_nav_list(call: CallbackQuery, bot: Bot):
+    parts = call.data.split(":")
+    viewer_id = int(parts[1])
+
+    if call.from_user.id != viewer_id:
+        return await call.answer("Это меню принадлежит другому пользователю 🔒", show_alert=True)
+
+    rels = await db.get_user_relationships(viewer_id)
+    if not rels:
+        return await call.answer("У вас нет отношений.", show_alert=True)
+
+    cur_idx = await db.get_active_rel_idx(viewer_id)
+    lines = ["💍 <b>Ваши союзы и отношения:</b>\n"]
+    kb_rows = []
+
+    for i, r in enumerate(rels, 1):
+        other_id = get_other_id(r, viewer_id)
+        other_user = await db.get_user(other_id)
+        other_name = other_user["first_name"] or str(other_id)
+        is_active = " 🌟 [АКТИВНА]" if i == cur_idx else ""
+        is_main = " (Основа)" if i == 1 else ""
+        lines.append(f"<b>{i}.</b> 👩‍❤️‍👨 {mention_id(other_id, other_name)}{is_main}{is_active} — Ур. {r['level']} ({r['xp']} ❤️)")
+        kb_rows.append([InlineKeyboardButton(text=f"Пара #{i}: {other_name[:15]}{is_main}", callback_data=f"rel_nav:{viewer_id}:{i}")])
+
+    kb_rows.append([InlineKeyboardButton(text="🔙 Назад к активной паре", callback_data=f"rel_nav:{viewer_id}:{cur_idx}")])
+
+    try:
+        await call.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows), disable_web_page_preview=True)
+    except Exception:
+        pass
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith("rel_prop:"))
@@ -284,9 +394,8 @@ async def cb_proposal(call: CallbackQuery, bot: Bot):
         await call.message.edit_text("💔 Предложение отклонено. Сердце разбито...")
         return await call.answer()
 
-    # Проверяем, не успел ли кто-то вступить в другие отношения
-    if await db.get_relationship(from_id) or await db.get_relationship(to_id):
-        await call.message.edit_text("⚠️ Один из участников уже находится в отношениях.")
+    if await db.are_in_relationship(from_id, to_id):
+        await call.message.edit_text("⚠️ Вы уже находитесь в отношениях друг с другом.")
         return await call.answer()
 
     rel_id = await db.create_relationship(from_id, to_id)
@@ -295,33 +404,64 @@ async def cb_proposal(call: CallbackQuery, bot: Bot):
     n1 = u1["first_name"] or str(from_id)
     n2 = u2["first_name"] or str(to_id)
 
+    u2_rels = await db.get_user_relationships(to_id)
+
     await call.message.edit_text(
         f"🎉 <b>Горько!</b> 🎉\n\n"
         f"💍 <b>{mention_id(from_id, n1)}</b> и <b>{mention_id(to_id, n2)}</b> "
         f"теперь официально в отношениях!\n\n"
         f"Вам открыт <b>1-й уровень пары</b>! Используйте <code>отн меню</code>, "
-        f"делайте комплименты и дарите подарки, чтобы развивать союз! ❤️",
-        reply_markup=rel_main_keyboard(rel_id))
+        f"делайте комплименты (<code>сделать комплимент</code>) и дарите подарки, чтобы развивать союз! ❤️",
+        reply_markup=rel_main_keyboard(rel_id, to_id, len(u2_rels), len(u2_rels)))
     await call.answer("Поздравляем с созданием союза! 💍", show_alert=True)
 
 
 @router.message(Cmd("развод", "отн развод", "расторгнуть", "расстаться", section=S_REL,
-                    usage="развод", desc="Расторгнуть отношения"))
-async def cmd_divorce(message: Message, **kw):
+                    usage="развод [номер/@юзер]", desc="Расторгнуть отношения"))
+async def cmd_divorce(message: Message, bot: Bot, args: str = "", **kw):
     me_id = message.from_user.id
-    rel = await db.get_relationship(me_id)
-    if not rel:
+    rels = await db.get_user_relationships(me_id)
+    if not rels:
         return await message.reply("Вы не состоите в отношениях.")
 
-    other_id = get_other_id(rel, me_id)
+    target_rel = None
+    target_arg = (args or "").strip()
+
+    if target_arg.isdigit():
+        t_idx = int(target_arg)
+        if 1 <= t_idx <= len(rels):
+            target_rel = rels[t_idx - 1]
+    elif target_arg.lower() in ("основа", "основной"):
+        target_rel = rels[0]
+    else:
+        uid, _, _ = await resolve_target(message, args, bot)
+        if uid:
+            for r in rels:
+                if get_other_id(r, me_id) == uid:
+                    target_rel = r
+                    break
+
+    if not target_rel:
+        cur_idx = await db.get_active_rel_idx(me_id)
+        if cur_idx <= len(rels):
+            target_rel = rels[cur_idx - 1]
+        else:
+            target_rel = rels[0]
+
+    other_id = get_other_id(target_rel, me_id)
     partner = await db.get_user(other_id)
     pname = partner["first_name"] or str(other_id)
 
-    await db.delete_relationship(rel["id"])
+    await db.delete_relationship(target_rel["id"])
+    await db.set_active_rel_idx(me_id, 1)
+
+    rem_rels = await db.get_user_relationships(me_id)
+    rem_text = f"\n\nУ вас осталось ещё <b>{len(rem_rels)}</b> союзов." if rem_rels else "\n\nУ вас больше нет активных отношений."
+
     await message.reply(
         f"💔 <b>Отношения расторгнуты.</b>\n\n"
         f"{mention(message.from_user)} и {mention_id(other_id, pname)} больше не вместе. "
-        f"Все совместные вещи и достижения аннулированы.")
+        f"Совместное имущество и достижения этой пары аннулированы.{rem_text}")
 
 
 # ================== ПРОКАЧКА ОТНОШЕНИЙ ==================
@@ -407,10 +547,152 @@ async def process_rel_action(message: Message, bot: Bot, action_key: str):
     await message.reply(reply_text)
 
 
+COMPLIMENTS = [
+    "Твоя улыбка способна осветить даже самый пасмурный день! ☀️",
+    "Ты невероятно добрый, отзывчивый и светлый человек! ✨",
+    "С тобой любое общение становится тёплым и уютным! ☕️",
+    "Твоё чувство юмора — просто высший пилотаж! 😄",
+    "Ты потрясающе выглядишь и заряжаешь всех уверенностью! 💫",
+    "Рядом с тобой всегда легко, спокойно и радостно! 🌸",
+    "Твоей мудрости, терпению и рассудительности можно только позавидовать! 🧠",
+    "Ты делаешь этот чат и весь мир намного прекраснее! 🌺",
+    "Твои глаза полны искренности, глубины и тепла! 👁️✨",
+    "У тебя потрясающий вкус, грация и стиль! 👗👔",
+    "Ты самый надёжный и замечательный друг на свете! 🤝",
+    "Твоя энергия и позитив вдохновляют всех вокруг! ⚡️",
+    "Ты умеешь выслушать и поддержать в самый нужный момент! 💖",
+    "Ты настоящий лучик солнца и гордость нашей беседы! 🌟",
+    "Ты заслуживаешь море радости, счастья и исполнения всех желаний! 🎁",
+]
+
 # Регистрация команд действий
-@router.message(Cmd("комплимент", "отн комплимент", section=S_REL, usage="комплимент", desc="Сделать комплимент (+5 любви)"))
-async def cmd_act_compliment(message: Message, bot: Bot, **kw):
-    await process_rel_action(message, bot, "комплимент")
+@router.message(Cmd("сделать комплимент", "комплимент", "похвалить", "отн комплимент",
+                    section=S_REL, usage="сделать комплимент",
+                    desc="Сделать комплимент второй половинке или всем партнерам (+5 любви)"))
+async def cmd_act_compliment(message: Message, bot: Bot, args: str = "", **kw):
+    me_id = message.from_user.id
+    rels = await db.get_user_relationships(me_id)
+
+    # Если пользователь явно указал другого пользователя (@юзер или ответ)
+    uid, name, _ = await resolve_target(message, args, bot)
+    if uid and uid != me_id:
+        partner_rel = next((r for r in rels if get_other_id(r, me_id) == uid), None)
+        if not partner_rel:
+            # Обычный дружеский комплимент пользователю без отношений
+            phrase = random.choice(COMPLIMENTS)
+            return await message.reply(
+                f"💬 {mention(message.from_user)} делает комплимент {mention_id(uid, name)}:\n\n"
+                f"✨ «<i>{phrase}</i>» ✨")
+
+    # Если отношений вообще нет
+    if not rels:
+        return await message.reply(
+            "💬 <b>Сделать комплимент</b>\n\n"
+            "У вас пока нет отношений. Чтобы радовать свою вторую половинку и прокачивать любовь, "
+            "вступите в отношения: <code>отн @юзер</code>!\n\n"
+            "💡 <i>Вы также можете сделать обычный комплимент любому участнику: <code>комплимент @юзер</code></i>",
+            disable_web_page_preview=True)
+
+    # VIP расчет
+    vip_lvl, _, vip_active = await db.get_vip_info(me_id)
+    base_xp = 5
+    bonus_xp = 0
+    vip_badge = ""
+    if vip_active:
+        if vip_lvl >= 2:
+            bonus_xp = int(base_xp * 0.50)
+            vip_badge = " <i>(+50% VIP+ бонус)</i>"
+        elif vip_lvl >= 1:
+            bonus_xp = int(base_xp * 0.25)
+            vip_badge = " <i>(+25% VIP бонус)</i>"
+    earned_xp = base_xp + bonus_xp
+    phrase = random.choice(COMPLIMENTS)
+
+    # Если 1 отношение
+    if len(rels) == 1:
+        rel = rels[0]
+        other_id = get_other_id(rel, me_id)
+        partner = await db.get_user(other_id)
+        pname = partner["first_name"] or str(other_id)
+
+        if rel["offended_by"] == other_id:
+            return await message.reply(
+                f"💔 <b>Ваш партнер обижен на вас!</b>\n\n"
+                f"{mention_id(other_id, pname)} обижается, поэтому романтические действия заблокированы.\n"
+                f"Вам нужно задобрить вторую половинку: <code>отн задобрить</code>!")
+
+        cd = 600
+        left = await db.get_rel_cooldown_left(rel["id"], me_id, "комплимент", cd)
+        if left > 0:
+            return await message.reply(
+                f"⏳ 💬 <b>Сделать комплимент</b> уже было недавно.\n"
+                f"Подождите ещё <b>{human_period(left)}</b> перед повтором.")
+
+        cost = 3
+        user = await db.get_user(me_id)
+        if user["balance"] < cost:
+            return await message.reply(
+                f"🍬 Не хватает ирисок для комплимента!\n"
+                f"Требуется: <b>{cost} 🪙</b>, у вас: <b>{user['balance']} 🪙</b>.\n"
+                f"Заработайте ириски командой <code>работа</code>!")
+
+        await db.add_balance(me_id, -cost, "rel_compliment")
+        await db.set_rel_cooldown(rel["id"], me_id, "комплимент")
+        new_xp, new_lvl, lvl_up = await db.add_rel_xp(rel["id"], earned_xp)
+
+        reply_text = (
+            f"💬 {mention(message.from_user)} сделал(а) комплимент своей 2 половинке {mention_id(other_id, pname)}:\n\n"
+            f"✨ «<i>{phrase}</i>» ✨\n\n"
+            f"💖 Получено: <b>+{earned_xp} любви</b>{vip_badge}\n"
+            f"🍬 Потрачено: <b>{cost} 🪙</b>\n"
+            f"✨ Всего любви: <b>{new_xp}</b> (Уровень {new_lvl})"
+        )
+        if lvl_up:
+            reply_text += (
+                f"\n\n🎊 <b>УРОВЕНЬ ОТНОШЕНИЙ ПОВЫШЕН ДО {new_lvl}!</b> 🎊\n"
+                f"Вам открылись новые действия в <code>отн меню</code>! 💖"
+            )
+        return await message.reply(reply_text)
+
+    # Если отношений несколько (>1)
+    cost_per_rel = 3
+    total_cost = cost_per_rel * len(rels)
+    user = await db.get_user(me_id)
+    if user["balance"] < total_cost:
+        return await message.reply(
+            f"🍬 Не хватает ирисок для комплимента всем партнерам ({len(rels)} союзов)!\n"
+            f"Требуется: <b>{total_cost} 🪙</b>, у вас: <b>{user['balance']} 🪙</b>.")
+
+    partner_mentions = []
+    lvl_ups = []
+    applied_count = 0
+
+    for r in rels:
+        other_id = get_other_id(r, me_id)
+        p = await db.get_user(other_id)
+        pname = p["first_name"] or str(other_id)
+        partner_mentions.append(mention_id(other_id, pname))
+
+        await db.set_rel_cooldown(r["id"], me_id, "комплимент")
+        _, new_lvl, lvl_up = await db.add_rel_xp(r["id"], earned_xp)
+        if lvl_up:
+            lvl_ups.append(f"• с {mention_id(other_id, pname)}: <b>Уровень {new_lvl}</b> 🏆")
+        applied_count += 1
+
+    await db.add_balance(me_id, -total_cost, "rel_compliment_multi")
+    partners_str = ", ".join(partner_mentions)
+
+    reply_text = (
+        f"💬 {mention(message.from_user)} сделал(а) комплимент своим партнерам {partners_str}:\n\n"
+        f"✨ «<i>{phrase}</i>» ✨\n\n"
+        f"💖 Получено: <b>+{earned_xp} любви</b> во все союзы ({applied_count}){vip_badge}\n"
+        f"🍬 Потрачено: <b>{total_cost} 🪙</b>"
+    )
+    if lvl_ups:
+        reply_text += "\n\n🎊 <b>ПОВЫШЕНИЕ УРОВНЯ В СОЮЗАХ:</b>\n" + "\n".join(lvl_ups)
+
+    return await message.reply(reply_text)
+
 
 @router.message(Cmd("анекдот", "отн анекдот", section=S_REL, usage="анекдот", desc="Рассказать анекдот (+10 любви)"))
 async def cmd_act_joke(message: Message, bot: Bot, **kw):
@@ -676,8 +958,10 @@ async def cb_rel_ui(call: CallbackQuery, bot: Bot):
     ])
 
     if action == "main":
-        text = await format_rel_card(rel, bot)
-        await call.message.edit_text(text, reply_markup=rel_main_keyboard(rel_id), disable_web_page_preview=True)
+        user_rels = await db.get_user_relationships(call.from_user.id)
+        cur_idx = next((i + 1 for i, r in enumerate(user_rels) if r["id"] == rel["id"]), 1)
+        text = await format_rel_card(rel, bot, call.from_user.id)
+        await call.message.edit_text(text, reply_markup=rel_main_keyboard(rel_id, call.from_user.id, len(user_rels), cur_idx), disable_web_page_preview=True)
         return await call.answer()
 
     elif action == "acts":
@@ -730,3 +1014,113 @@ async def cb_rel_ui(call: CallbackQuery, bot: Bot):
             lines.append(f"{e} <b>{n}</b> — <b>{p:,} 🪙</b> ({avail})\n   Купить: <code>отн купить {k}</code>")
         await call.message.edit_text("\n".join(lines), reply_markup=back_kb)
         return await call.answer()
+
+
+# ================== ДРУЗЬЯ (ДРУЖЕСКИЕ ОТНОШЕНИЯ) ==================
+
+@router.message(Cmd("друг", "дружить", "добавить в друзья", "предложить дружбу",
+                    "+друг", "+друзья", "дружба",
+                    section=S_REL, usage="друг @юзер",
+                    desc="Предложить дружбу пользователю (можно дружить со многими)"))
+async def cmd_friend_add(message: Message, bot: Bot, args: str = "", **kw):
+    me_id = message.from_user.id
+    uid, name, _ = await resolve_target(message, args, bot)
+    if not uid:
+        return await message.reply(
+            "🤝 <b>Добавление в друзья</b>\n\n"
+            "Формат: <code>друг @username</code> или ответьте на сообщение пользователя командой <code>друг</code>.\n\n"
+            "💡 <i>В отличие от брака, дружить можно с любым количеством участников!</i>")
+
+    if uid == me_id:
+        return await message.reply("Нельзя предложить дружбу самому себе 🙂")
+
+    if await db.are_friends(me_id, uid):
+        return await message.reply(f"🤝 Вы и {mention_id(uid, name)} уже являетесь друзьями!")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🤝 Принять дружбу", callback_data=f"frnd_prop:yes:{me_id}:{uid}"),
+        InlineKeyboardButton(text="🚫 Отклонить", callback_data=f"frnd_prop:no:{me_id}:{uid}")
+    ]])
+
+    await message.reply(
+        f"🤝 {mention(message.from_user)} предлагает крепкую дружбу {mention_id(uid, name)}!\n\n"
+        f"Что ответит будущий друг?",
+        reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("frnd_prop:"))
+async def cb_friend_proposal(call: CallbackQuery, bot: Bot):
+    parts = call.data.split(":")
+    act, from_id_s, to_id_s = parts[1], parts[2], parts[3]
+    from_id, to_id = int(from_id_s), int(to_id_s)
+
+    if call.from_user.id != to_id:
+        return await call.answer("Это предложение адресовано не вам! 🔒", show_alert=True)
+
+    if act == "no":
+        await call.message.edit_text("🚫 Предложение дружбы отклонено.")
+        return await call.answer()
+
+    await db.add_friend(from_id, to_id)
+    u1 = await db.get_user(from_id)
+    u2 = await db.get_user(to_id)
+    n1 = u1["first_name"] or str(from_id)
+    n2 = u2["first_name"] or str(to_id)
+
+    await call.message.edit_text(
+        f"🎉 <b>У вас новый друг!</b> 🎉\n\n"
+        f"🤝 <b>{mention_id(from_id, n1)}</b> и <b>{mention_id(to_id, n2)}</b> теперь официально друзья!\n\n"
+        f"Посмотреть всех друзей: <code>друзья</code>")
+    await call.answer("Вы стали друзьями! 🤝", show_alert=True)
+
+
+@router.message(Cmd("друзья", "список друзей", "мои друзья", "друзья список", "кто друзья",
+                    section=S_REL, usage="друзья [@юзер]",
+                    desc="Посмотреть список друзей"))
+async def cmd_friends_list(message: Message, bot: Bot, args: str = "", **kw):
+    target_uid, name, _ = await resolve_target(message, args, bot)
+    if not target_uid:
+        target_uid = message.from_user.id
+        name = message.from_user.first_name
+
+    friends = await db.get_friends(target_uid)
+    if not friends:
+        if target_uid == message.from_user.id:
+            return await message.reply(
+                "🤝 <b>У вас пока нет друзей.</b>\n\n"
+                "Чтобы завести друзей, напишите: <code>друг @юзер</code> или ответьте на его сообщение командой <code>друг</code>!",
+                disable_web_page_preview=True)
+        else:
+            return await message.reply(f"🤝 У {mention_id(target_uid, name)} пока нет друзей.")
+
+    lines = [f"🤝 <b>Список друзей {mention_id(target_uid, name)}</b> (всего: <b>{len(friends)}</b>):\n"]
+    now = int(time.time())
+    for idx, f in enumerate(friends, 1):
+        fid = f["friend_id"]
+        fu = await db.get_user(fid)
+        fname = fu["first_name"] or str(fid)
+        days = max(1, (now - f["created_at"]) // 86400)
+        lines.append(f"<b>{idx}.</b> 👤 {mention_id(fid, fname)} — дружат <b>{days} дн.</b>")
+        if idx >= 30:
+            lines.append("<i>... и другие друзья</i>")
+            break
+
+    lines.append("\n💡 <i>Добавить друга: <code>друг @юзер</code> · Удалить: <code>удалить из друзей @юзер</code></i>")
+    await message.reply("\n".join(lines), disable_web_page_preview=True)
+
+
+@router.message(Cmd("удалить из друзей", "разорвать дружбу", "удалить друга", "-друг", "-друзья",
+                    section=S_REL, usage="удалить из друзей {ссылка}",
+                    desc="Удалить пользователя из списка друзей"))
+async def cmd_friend_remove(message: Message, bot: Bot, args: str = "", **kw):
+    me_id = message.from_user.id
+    uid, name, _ = await resolve_target(message, args, bot)
+    if not uid:
+        return await message.reply("Укажите друга: <code>удалить из друзей @юзер</code>")
+
+    if not await db.are_friends(me_id, uid):
+        return await message.reply(f"Вы не состоите в друзьях с {mention_id(uid, name)}.")
+
+    await db.remove_friend(me_id, uid)
+    await message.reply(f"💔 Дружба между вами и {mention_id(uid, name)} прекращена.")
+

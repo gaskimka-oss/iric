@@ -22,8 +22,10 @@ SETTINGS: dict[int, dict[str, str]] = {
         "form_topic": "148507",     # тема, где новички пишут описание
         "form_required": "1",       # описание обязательно
         "gram_topic": "132681",     # тема для граммов и игр
+        "sms_topic": "4",           # тема СМС и анонсов обновлений
     },
 }
+
 
 # состав модерации: username -> (имя, ранг, user_id)
 STAFF: dict[int, dict[str, tuple[str, int, int]]] = {

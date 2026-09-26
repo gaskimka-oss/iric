@@ -64,19 +64,24 @@ async def resolve_target(message: Message, args: str, bot: Bot) -> tuple[Optiona
         uname = m.group(1)
         rest = (rest[:m.start()] + rest[m.end():]).strip()
         row = await db.fetchone(
-            "SELECT user_id, first_name FROM users WHERE lower(username)=lower(?)", (uname,))
+            "SELECT user_id, first_name FROM users WHERE lower(username)=lower(?) OR lower(nick)=lower(?)",
+            (uname, uname))
         if row:
             return row["user_id"], row["first_name"], rest
         # Человек мог выйти до команды, но остаться в импортированном составе.
-        # Если бот когда-либо видел его membership-событие, user_id уже привязан.
         row = await db.fetchone(
-            "SELECT user_id, name FROM staff WHERE lower(username)=lower(?) "
-            "AND user_id IS NOT NULL AND user_id<>0 ORDER BY ts DESC LIMIT 1", (uname,))
+            "SELECT user_id, name FROM staff WHERE (lower(username)=lower(?) OR lower(name)=lower(?)) "
+            "AND user_id IS NOT NULL AND user_id<>0 ORDER BY ts DESC LIMIT 1", (uname, uname))
         if row:
             return row["user_id"], row["name"] or uname, rest
+        # Поиск по дополнительному нику в профилях
+        row = await db.fetchone(
+            "SELECT p.user_id, u.first_name FROM profiles p "
+            "LEFT JOIN users u ON u.user_id=p.user_id WHERE lower(p.nick2)=lower(?) LIMIT 1", (uname,))
+        if row and row["user_id"]:
+            return row["user_id"], row["first_name"] or uname, rest
         # Telegram не разрешает искать обычного пользователя по @нику через
-        # Bot API, но список администраторов текущего чата доступен. Это чинит
-        # «снять @admin», даже если администратор ещё ничего не писал боту.
+        # Bot API, но список администраторов текущего чата доступен.
         try:
             for member in await bot.get_chat_administrators(message.chat.id):
                 user = member.user

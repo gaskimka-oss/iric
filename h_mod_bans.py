@@ -47,7 +47,7 @@ USERNAME_RE = re.compile(r"@([A-Za-z0-9_]{4,32})")
 
 
 async def _queue_unknown_target(message: Message, args: str, kind: str) -> bool:
-    """Сохраняет мут/бан по нику до момента, когда станет известен user_id."""
+    """Сохраняет мут/бан/варн по нику до момента, когда станет известен user_id."""
     match = USERNAME_RE.search(args or "")
     if not match:
         return False
@@ -55,18 +55,19 @@ async def _queue_unknown_target(message: Message, args: str, kind: str) -> bool:
     rest = ((args or "")[:match.start()] + (args or "")[match.end():]).strip()
     seconds, reason = parse_period(rest)
     reason, forever = strip_forever(reason)
-    if forever:
+    if forever or kind == "warn":
         seconds = 0
     reason = reason.strip() or "Без причины"
     import core_pending_punish as pending
     await pending.schedule(message.chat.id, username, kind, reason, seconds,
                            message.from_user.id if message.from_user else 0)
-    action = "мут" if kind == "mute" else "бан"
+    action = "предупреждение" if kind == "warn" else ("мут" if kind == "mute" else "бан")
+    period_str = f"⏱ Срок: <b>{human_period(seconds)}</b>\n" if kind != "warn" else ""
     await message.reply(
-        f"⏳ <b>{action.capitalize()} сохранён для @{html.escape(username)}</b>\n\n"
+        f"⏳ <b>{action.capitalize()} сохранено для @{html.escape(username)}</b>\n\n"
         "Telegram пока не передал его числовой ID. Наказание автоматически "
         "применится при его следующем сообщении, входе или событии участника.\n"
-        f"⏱ Срок: <b>{human_period(seconds)}</b>\n"
+        f"{period_str}"
         f"📝 Причина: {html.escape(reason)}\n\n"
         "Для немедленного применения можно указать числовой ID или ответить "
         "командой на сообщение пользователя.")
@@ -258,6 +259,10 @@ async def cmd_kick(message: Message, bot: Bot, args: str = "", **kw):
                     usage="варн {ссылка} {причина}", desc="Выдать предупреждение"))
 async def cmd_warn(message: Message, bot: Bot, args: str = "", **kw):
     uid, name, rest = await resolve_target(message, args, bot)
+    if not uid:
+        if await _queue_unknown_target(message, args, "warn"):
+            return
+        return await message.reply("Укажите пользователя: реплаем, @ником или id.")
     err = await guard_target(message, bot, uid, "предупредить")
     if err:
         return await message.reply(err)
@@ -541,6 +546,50 @@ async def cmd_purge(message: Message, bot: Bot, args: str = "", **kw):
     except Exception:
         pass
     await message.answer(f"🧹 Удалено сообщений: <b>{deleted}</b>")
+
+
+@router.message(Cmd("неактив", "неактивные", "список неактива", "кто не актив", "молчуны",
+                    "неактив чата", "неактивные участники", "неактив лист", "лист неактива",
+                    section=S_CLEAN, rank=0,
+                    usage="неактив [период]", desc="Список неактивных участников чата"))
+async def cmd_inactive_list(message: Message, bot: Bot, args: str = "", **kw):
+    from core_resolve import human_period, parse_period
+    secs, _ = parse_period(args) if args else (0, "")
+    secs = secs or 14 * 86400  # по умолчанию 14 дней
+    border = int(time.time()) - secs
+
+    rows = await db.fetchall(
+        "SELECT s.user_id, s.last_seen, s.messages, u.username, u.first_name, u.nick "
+        "FROM chat_stats s "
+        "LEFT JOIN users u ON u.user_id=s.user_id "
+        "WHERE s.chat_id=? AND (s.last_seen < ? OR s.last_seen = 0) "
+        "ORDER BY s.last_seen ASC, s.messages ASC LIMIT 30",
+        (message.chat.id, border))
+
+    if not rows:
+        return await message.reply(f"🟢 Неактивных участников (более {human_period(secs)}) не найдено!")
+
+    now = int(time.time())
+    lines = [f"💤 <b>Неактивные участники (не писали более {human_period(secs)}):</b>\n"]
+    for idx, r in enumerate(rows, 1):
+        nm = r["nick"] or r["first_name"] or (f"@{r['username']}" if r["username"] else f"ID:{r['user_id']}")
+        if r["last_seen"]:
+            days = max(1, (now - r["last_seen"]) // 86400)
+            seen_str = f"{days} дн. назад"
+        else:
+            seen_str = "очень давно"
+        lines.append(f"<b>{idx}.</b> {mention_id(r['user_id'], html.escape(nm))} — актив: <b>{seen_str}</b> (сообщений: {r['messages']})")
+
+    total_cnt = await db.fetchone(
+        "SELECT COUNT(*) c FROM chat_stats WHERE chat_id=? AND last_seen < ?",
+        (message.chat.id, border))
+    tot = total_cnt["c"] if total_cnt else len(rows)
+    if tot > len(rows):
+        lines.append(f"\n<i>…и ещё {tot - len(rows)} неактивных</i>")
+
+    lines.append(f"\nВсего неактивных: <b>{tot}</b>")
+    lines.append(f"💡 Исключить неактивных: <code>кик неактив {human_period(secs)}</code>")
+    await message.reply("\n".join(lines), disable_web_page_preview=True)
 
 
 @router.message(Cmd("кик неактив", "чистка неактив", section=S_CLEAN, rank=4,
