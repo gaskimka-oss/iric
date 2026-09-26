@@ -281,11 +281,7 @@ async def cmd_warn(message: Message, bot: Bot, args: str = "", **kw):
     row = await db.fetchone("SELECT COUNT(*) c FROM warns WHERE chat_id=? AND user_id=?",
                             (message.chat.id, uid))
 
-    # У персонала свой лимит для каждой ступени; у обычных игроков остаётся
-    # настраиваемый общий лимит с автомутом.
-    rank_limit = RANK_WARN_LIMITS.get(target_rank)
-    limit = rank_limit or int(await db.get_setting(
-        message.chat.id, "warn_limit", str(WARN_LIMIT)))
+    limit = int(await db.get_setting(message.chat.id, "warn_limit", str(WARN_LIMIT)))
     text = (f"⚠️ <b>Предупреждение {row['c']}/{limit}</b>\n"
             f"👤 {mention_id(uid, name)}\n"
             f"🎖 Статус: <b>{rank_label(target_rank) if target_rank else 'Игрок'}</b>\n"
@@ -293,29 +289,19 @@ async def cmd_warn(message: Message, bot: Bot, args: str = "", **kw):
             f"👮 {mention_id(message.from_user.id, message.from_user.first_name)}\n"
             f"<code>#{pid}</code>")
     if row["c"] >= limit:
-        if rank_limit:
-            new_rank = target_rank - 1
-            await set_rank(message.chat.id, uid, new_rank, message.from_user.id)
-            await db.execute("DELETE FROM warns WHERE chat_id=? AND user_id=?",
-                             (message.chat.id, uid))
-            new_label = rank_label(new_rank) if new_rank else "Игрок"
-            text += (f"\n\n⬇️ Лимит варнов для должности достигнут.\n"
-                     f"Понижен: <b>{rank_label(target_rank)}</b> → <b>{new_label}</b>.\n"
-                     "Счётчик варнов для новой ступени обнулён.")
-        else:
-            until = datetime.now(timezone.utc) + timedelta(hours=WARN_MUTE_HOURS)
-            try:
-                await bot.restrict_chat_member(message.chat.id, uid, MUTE_OFF, until_date=until)
-                await log_punish(message.chat.id, uid, "mute",
-                                 f"автомут: {limit} предупреждений", WARN_MUTE_HOURS * 3600, 0)
-                text += f"\n\n🔇 Лимит достигнут — автомут на {WARN_MUTE_HOURS} ч."
-            except Exception as e:
-                if "administrator" in str(e).lower():
-                    text += "\n\n<i>(автомут не применён: пользователь — админ Telegram)</i>"
-                else:
-                    text += "\n\n<i>(не хватило прав для автомута)</i>"
-            await db.execute("DELETE FROM warns WHERE chat_id=? AND user_id=?",
-                             (message.chat.id, uid))
+        until = datetime.now(timezone.utc) + timedelta(hours=WARN_MUTE_HOURS)
+        try:
+            await bot.restrict_chat_member(message.chat.id, uid, MUTE_OFF, until_date=until)
+            await log_punish(message.chat.id, uid, "mute",
+                             f"автомут: {limit} предупреждений", WARN_MUTE_HOURS * 3600, 0)
+            text += f"\n\n🔇 Лимит предупреждений ({limit}) достигнут — автомут на {WARN_MUTE_HOURS} ч."
+        except Exception as e:
+            if "administrator" in str(e).lower():
+                text += "\n\n<i>(автомут не применён: пользователь — админ Telegram)</i>"
+            else:
+                text += "\n\n<i>(не хватило прав для автомута)</i>"
+        await db.execute("DELETE FROM warns WHERE chat_id=? AND user_id=?",
+                         (message.chat.id, uid))
     ctx = await modlog.build_context(message.chat.id, uid)
     await modlog.write(message.chat.id, pid, uid, name,
                        message.from_user.id, message.from_user.first_name,
@@ -590,6 +576,75 @@ async def cmd_inactive_list(message: Message, bot: Bot, args: str = "", **kw):
     lines.append(f"\nВсего неактивных: <b>{tot}</b>")
     lines.append(f"💡 Исключить неактивных: <code>кик неактив {human_period(secs)}</code>")
     await message.reply("\n".join(lines), disable_web_page_preview=True)
+
+
+@router.message(Cmd("варн неактив", "варн неактивным", "варн всех кто неактив", "варн неактива",
+                    "преды неактив", "пред неактив", "предупреждения неактив",
+                    section=S_BAN, rank=3, usage="варн неактив [период]",
+                    desc="Выдать варн на 30 дней всем неактивным участникам (ранг 3+ / тех.админ)"))
+async def cmd_warn_inactive(message: Message, bot: Bot, args: str = "", **kw):
+    if not await require(message, bot, 3):
+        return
+    secs, _ = parse_period(args)
+    secs = secs or 14 * 86400  # по умолчанию 14 дней
+    border = int(time.time()) - secs
+    rows = await db.fetchall(
+        "SELECT user_id FROM chat_stats WHERE chat_id=? AND (last_seen < ? OR last_seen = 0)",
+        (message.chat.id, border))
+    if not rows:
+        return await message.reply(f"🟢 Неактивных участников (более {human_period(secs)}) не найдено!")
+
+    now = int(time.time())
+    warn_duration = 30 * 86400  # 30 дней
+    reason = f"Неактив в чате более {human_period(secs)}. Обжаловать можно у администрации в ЛС."
+
+    limit = int(await db.get_setting(message.chat.id, "warn_limit", str(WARN_LIMIT)))
+    warned = 0
+    muted = 0
+
+    for r in rows[:100]:
+        uid = int(r["user_id"])
+        if await get_rank(message.chat.id, uid) > 0:
+            continue
+        try:
+            m = await bot.get_chat_member(message.chat.id, uid)
+            if m.status in {"left", "kicked", "creator", "administrator"}:
+                continue
+        except Exception:
+            continue
+
+        await db.execute(
+            "INSERT INTO warns (chat_id, user_id, admin_id, reason, ts) VALUES (?,?,?,?,?)",
+            (message.chat.id, uid, message.from_user.id, reason, now))
+        await log_punish(message.chat.id, uid, "warn", reason, warn_duration, message.from_user.id)
+        warned += 1
+
+        w_count = await db.fetchone(
+            "SELECT COUNT(*) c FROM warns WHERE chat_id=? AND user_id=?",
+            (message.chat.id, uid))
+        if w_count and int(w_count["c"]) >= limit:
+            until = datetime.now(timezone.utc) + timedelta(hours=WARN_MUTE_HOURS)
+            try:
+                await bot.restrict_chat_member(message.chat.id, uid, MUTE_OFF, until_date=until)
+                await log_punish(message.chat.id, uid, "mute",
+                                 f"автомут: {limit} предупреждений (неактив)", WARN_MUTE_HOURS * 3600, 0)
+                await db.execute("DELETE FROM warns WHERE chat_id=? AND user_id=?", (message.chat.id, uid))
+                muted += 1
+            except Exception:
+                pass
+
+    if warned == 0:
+        return await message.reply("Не найдено участников для выдачи варна за неактив.")
+
+    mute_note = f"\n🔇 Автоматически замучено за превышение лимита варнов: <b>{muted}</b>" if muted else ""
+    text = (
+        f"⚠️ <b>Массовая выдача предупреждений за неактив завершена!</b>\n\n"
+        f"👥 Предупреждения получили: <b>{warned}</b> участников\n"
+        f"⏱ Срок действия варна: <b>30 дней</b>\n"
+        f"📝 Причина: <i>Неактив в чате более {human_period(secs)}</i>{mute_note}\n\n"
+        f"💬 <b>Обжаловать или снять предупреждение можно у администрации в ЛС.</b>"
+    )
+    await message.reply(text)
 
 
 @router.message(Cmd("кик неактив", "чистка неактив", section=S_CLEAN, rank=4,

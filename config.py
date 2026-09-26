@@ -21,7 +21,7 @@ def _int_list(raw: str) -> list[int]:
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "").strip()
 # ID владельца зашит в код: переменная окружения на хостинге не долетает.
 # Если OWNER_ID всё же задан в панели — возьмётся оттуда.
-DEFAULT_OWNER = 8412527198          # @Simba253
+DEFAULT_OWNER = 8297844640          # Kaktys6390 (Лидер клана)
 
 
 def _owner() -> int:

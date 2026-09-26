@@ -95,12 +95,10 @@ async def effective_rank(message: Message, bot: Bot) -> int:
     r = await get_rank(message.chat.id, uid)
     if r:
         return r
-    # ТГ-создатель чата получает высший ранг, ТГ-админ — 3
+    # ТГ-создатель/админ чата без ранга в боте получает ранг 3 (Младший админ)
     try:
         m = await bot.get_chat_member(message.chat.id, uid)
-        if m.status == "creator":
-            return MAX_RANK
-        if m.status == "administrator":
+        if m.status in {"creator", "administrator"}:
             return 3
     except Exception:
         pass

@@ -349,6 +349,59 @@ async def cmd_who_are_you(message: Message, bot: Bot, args: str = "", **kw):
     await message.reply(await bot_status_text(bot), disable_web_page_preview=True)
 
 
+@router.message(Cmd("сообщения", "мои сообщения", "смс", "сообщений", "актив", "стата",
+                    "сколько сообщений", "статистика сообщений", "сообщений юзера",
+                    section=S, usage="сообщения [@кого]",
+                    desc="Посмотреть количество сообщений участника в группе"))
+async def cmd_user_messages(message: Message, bot: Bot, args: str = "", **kw):
+    a = (args or "").strip()
+    me = message.from_user.id
+    if a or real_reply(message) is not None:
+        uid, name, _ = await resolve_target(message, a, bot)
+        if not uid:
+            who = html.escape((name or a).lstrip("@")[:32])
+            return await message.reply(f"🤔 Не знаю участника <b>@{who}</b>.")
+    else:
+        uid, name = me, message.from_user.first_name
+
+    u = await db.get_user(uid)
+    d, w, m_, allt = await activity_counts(message.chat.id, uid)
+    fs = await db.fetchone("SELECT ts FROM first_seen WHERE chat_id=? AND user_id=?",
+                           (message.chat.id, uid))
+    first_ts = fs["ts"] if fs else (u["created_at"] or 0)
+    st = await db.fetchone("SELECT last_seen, xp FROM chat_stats WHERE chat_id=? AND user_id=?",
+                           (message.chat.id, uid))
+    last_ts = st["last_seen"] if st else 0
+    chat_xp = st["xp"] if st else 0
+
+    # Место в топе активности
+    rank_pos_row = await db.fetchone(
+        "SELECT COUNT(*) c FROM chat_stats WHERE chat_id=? AND messages > ?",
+        (message.chat.id, allt))
+    pos = (rank_pos_row["c"] + 1) if rank_pos_row else 1
+
+    # Всего сообщений в чате от всех
+    total_chat_msgs_row = await db.fetchone(
+        "SELECT COALESCE(SUM(messages),0) s FROM chat_stats WHERE chat_id=?",
+        (message.chat.id,))
+    total_chat_msgs = int(total_chat_msgs_row["s"]) if total_chat_msgs_row else allt
+    pct = (allt / total_chat_msgs * 100) if total_chat_msgs > 0 else 0
+
+    who = mention_id(uid, html.escape(name or str(uid)))
+    lines = [
+        f"📊 <b>Статистика сообщений:</b> {who}\n",
+        f"💬 <b>Всего сообщений в группе:</b> <b>{allt:,}</b> ({pct:.1f}% от всей беседы)".replace(",", " "),
+        f"🏆 <b>Место в топе активности:</b> <b>#{pos}</b>",
+        f"📅 <b>Сегодня:</b> <b>{d}</b> смс",
+        f"🗓 <b>За 7 дней:</b> <b>{w}</b> смс",
+        f"🗓 <b>За 30 дней:</b> <b>{m_}</b> смс\n",
+        f"✨ <b>Опыт активности в чате:</b> {chat_xp} XP",
+        f"🕒 <b>Первое появление:</b> {time.strftime('%d.%m.%Y %H:%M', time.localtime(first_ts)) if first_ts else 'неизвестно'} ({human_since(first_ts)})",
+        f"⏳ <b>Последний актив:</b> {human_ago(last_ts)}",
+    ]
+    await message.reply("\n".join(lines), disable_web_page_preview=True)
+
+
 # ---------------- ОПИСАНИЕ ----------------
 @router.message(Cmd("описание", "анкета", "мое описание", "моё описание",
                     section=S, usage="описание {ссылка}",

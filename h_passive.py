@@ -47,47 +47,15 @@ def _rights_kb(bot_username: str, chat_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-async def _grant_owner(chat_id: int, bot: Bot) -> tuple[int, str] | None:
-    """Выдаёт владельцу (creator) группы высший ранг при первом входе бота."""
-    try:
-        admins = await bot.get_chat_administrators(chat_id)
-    except Exception:
-        return None
-    for m in admins:
-        if m.status == "creator" and m.user and not m.user.is_bot:
-            cur = await get_rank(chat_id, m.user.id)
-            if cur < MAX_RANK:
-                await set_rank(chat_id, m.user.id, MAX_RANK, 0)
-            await db.touch_user(m.user.id, m.user.username, m.user.first_name)
-            return m.user.id, m.user.first_name or "Владелец"
-    return None
-
-
 @router.my_chat_member(ChatMemberUpdatedFilter(IS_NOT_MEMBER >> IS_MEMBER))
 async def on_added(event: ChatMemberUpdated, bot: Bot):
-    """Бота добавили в группу: просим права и выдаём владельцу высший ранг."""
+    """Бота добавили в группу: просим права."""
     if event.chat.type not in {"group", "supergroup"}:
         return
     await db.register_chat(event.chat.id, event.chat.title)
 
     me = await bot.me()
     text = RIGHTS_TEXT
-
-    # владельцу группы — 7 ранг сразу
-    owner = await _grant_owner(event.chat.id, bot)
-    if owner:
-        uid, name = owner
-        text += (f"\n\n👑 {mention_id(uid, name)} — владелец чата, "
-                 f"выдан высший ранг:\n<b>{stars(MAX_RANK)} {RANK_NAMES[MAX_RANK]}</b>")
-    else:
-        # не смогли получить список админов (нет прав) — выдадим тому, кто добавил
-        adder = event.from_user
-        if adder and not adder.is_bot:
-            if await get_rank(event.chat.id, adder.id) < MAX_RANK:
-                await set_rank(event.chat.id, adder.id, MAX_RANK, 0)
-            text += (f"\n\n👑 {mention(adder)} — выдан высший ранг:\n"
-                     f"<b>{stars(MAX_RANK)} {RANK_NAMES[MAX_RANK]}</b>")
-
     text += "\n\n📖 <code>команды</code> — все возможности\n🔐 <code>ДК</code> — доступ команд"
 
     try:
@@ -115,9 +83,6 @@ async def on_rights_changed(event: ChatMemberUpdated, bot: Bot):
         missing.append("🔗 Приглашение по ссылке")
     if not getattr(new, "can_change_info", False):
         missing.append("🔧 Управление группой")
-
-    # владельцу на всякий случай ещё раз выдаём ранг
-    await _grant_owner(event.chat.id, bot)
 
     try:
         if missing:

@@ -31,10 +31,10 @@ SETTINGS: dict[int, dict[str, str]] = {
 STAFF: dict[int, dict[str, tuple[str, int, int]]] = {
     MAIN_CHAT: {
         "Kaktys6390": ("Kaktys6390", 8, 8297844640),
-        "Ksyxa0201": ("D乇尺ZK卂ㄚ卂", 7, 682842064),
+        "L_I_ZAVETKA": ("༒𝐿𝑖𝑧𝑎𝑣𝑒𝑡𝑎༒", 7, 6592023977),
         "Simba253": ("Simba", 6, 8412527198),
+        "Ksyxa0201": ("D乇尺ZK卂ㄚ卂", 5, 682842064),
         "sneik132": ("Sssss🔥", 3, 5955897143),
-        "L_I_ZAVETKA": ("✃𝐿𝒾𝓏𝒶𝓋𝑒𝓉𝒶 ✁", 3, 6592023977),
         "Fil1003": ("Fil1003", 3, 0),
     },
 }
@@ -176,6 +176,34 @@ async def remove_false_krueger_leadership() -> int:
     return removed
 
 
+async def fix_simba_lizaveta_ranks() -> int:
+    """Устанавливает правильные ранги модерации:
+    - Kaktys6390 (8297844640) -> 8 (Лидер клана)
+    - @L_I_ZAVETKA (6592023977) -> 7 (Заместитель лидера)
+    - Simba (8412527198) -> 6 (Технический администратор)
+    """
+    marker = "fix_simba_lizaveta_ranks_v3"
+    if await db.get_setting(0, marker, "") == "done":
+        return 0
+
+    now = int(time.time())
+    # 1. Kaktys6390 -> 8
+    await db.execute("UPDATE ranks SET rank=8 WHERE user_id=8297844640")
+    await db.execute("UPDATE staff SET rank=8 WHERE user_id=8297844640 OR lower(username)='kaktys6390'")
+
+    # 2. Lizaveta -> 7 (Заместитель)
+    await db.execute("UPDATE ranks SET rank=7 WHERE user_id=6592023977")
+    await db.execute("UPDATE staff SET rank=7, name='༒𝐿𝑖𝑧𝑎𝑣𝑒𝑡𝑎༒' WHERE user_id=6592023977 OR lower(username)='l_i_zavetka'")
+
+    # 3. Simba -> 6 (Тех. админ)
+    await db.execute("UPDATE ranks SET rank=6 WHERE user_id=8412527198")
+    await db.execute("UPDATE staff SET rank=6, name='Simba' WHERE user_id=8412527198 OR lower(username) IN ('simba', 'simba253')")
+
+    await db.set_setting(0, marker, "done")
+    log.info("Обновлены ранги: Kaktys6390 (8), Lizaveta (7), Simba (6)")
+    return 1
+
+
 async def apply() -> None:
     now = int(time.time())
     added_s = added_st = 0
@@ -184,6 +212,11 @@ async def apply() -> None:
         await remove_false_krueger_leadership()
     except Exception as e:
         log.warning("снятие ошибочного лидера Krueger: %s", e)
+
+    try:
+        await fix_simba_lizaveta_ranks()
+    except Exception as e:
+        log.warning("исправление рангов Симбы и Лизаветы: %s", e)
 
     try:
         await mark_filled_profiles()

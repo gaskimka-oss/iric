@@ -457,7 +457,7 @@ async def touch_user(user_id: int, username: str | None, first_name: str | None)
                 (user_id, r["chat_id"], username))
             await execute(
                 "INSERT INTO ranks (chat_id,user_id,rank,granted_by,ts) VALUES (?,?,?,0,?) "
-                "ON CONFLICT(chat_id,user_id) DO UPDATE SET rank=MAX(ranks.rank, excluded.rank)",
+                "ON CONFLICT(chat_id,user_id) DO NOTHING",
                 (r["chat_id"], user_id, r["rank"], int(__import__("time").time())))
 
 
