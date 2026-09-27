@@ -128,26 +128,114 @@ async def stat_chat(message: Message, bot: Bot, **kw):
         f"📊 В базе: <b>{row['c'] or 0}</b> чел., <b>{row['m'] or 0}</b> сообщений")
 
 
+DEFAULT_CLAN_RULES = (
+    "📜 <b>ПРАВИЛА КЛАНА &amp; БЕСЕДЫ</b> ⚔️\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "<blockquote>✨ <b>Настоящие правила обязательны к исполнению всеми участниками сообщества.</b>\n"
+    "Незнание правил не освобождает от ответственности!\n"
+    "Изменения вносятся администрацией клана.</blockquote>\n\n"
+    "🎮 <b>1. КЛАНОВАЯ ДЕЯТЕЛЬНОСТЬ:</b>\n"
+    "• ⚔️ Обязательное участие в запланированных клановых ивентах (КВ, Турниры, Кастомки, Съёмки видео).\n"
+    "• 🕒 При невозможности участия — предупредить руководство минимум <b>за 24 часа</b>.\n"
+    "• 🚫 Строго <b>запрещены читы, софты, скрипты и багоюз</b>.\n"
+    "• 🚫 Запрещено намеренно руинить игры, мешать соклановцам во время мероприятий и съёмок.\n\n"
+    "💬 <b>2. ОБЩЕНИЕ И ПОВЕДЕНИЕ В ЧАТЕ:</b>\n"
+    "• 🤝 Уважайте других участников, будьте вежливы и адекватны.\n"
+    "• 🚫 Запрещены токсичность, травля, провокации на конфликт и буллинг.\n"
+    "• 🚫 Запрещены спам, реклама сторонних каналов/ботов/серверов и реферальные ссылки.\n"
+    "• 🚫 Запрещены скам, мошенничество, обман участников и попытки кражи аккаунтов.\n"
+    "• 🚫 Запрещены обсуждения политики, религии, контент 18+ (NSFW) и чрезмерный капс.\n"
+    "• 🔒 Запрещено разглашение личных данных участников (доксинг/деанон).\n\n"
+    "⚖️ <b>СИСТЕМА НАКАЗАНИЙ &amp; СРОКИ:</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "💭 <b>ЛЁГКИЕ НАРУШЕНИЯ</b> <i>(капс, флуд, лёгкий оффтоп, мелкая грубость)</i>:\n"
+    "  1️⃣ <b>1-е нарушение:</b> 🔇 Мут на <b>15 – 60 минут</b>\n"
+    "  2️⃣ <b>2-е нарушение:</b> 🔇 Мут на <b>3 – 6 часов</b>\n"
+    "  3️⃣ <b>3-е нарушение:</b> ⚠️ <b>1 Предупреждение (Варн)</b>\n\n"
+    "🧱 <b>ГРУБЫЕ НАРУШЕНИЯ</b> <i>(оскорбления, провокация конфликтов, токсичность, мат в адрес игрока, помехи на КВ/съёмках)</i>:\n"
+    "  1️⃣ <b>1-е нарушение:</b> ⚠️ <b>1 Варн</b>\n"
+    "  2️⃣ <b>2-е нарушение:</b> ⚠️ <b>2-й Варн</b>\n"
+    "  3️⃣ <b>3-е нарушение:</b> 🔇 <b>Мут на 12 – 24 часа</b>\n\n"
+    "🚨 <b>КРИТИЧЕСКИЕ НАРУШЕНИЯ</b> <i>(читы, реклама/спам, скам/обман, деанон, 18+, буллинг)</i>:\n"
+    "  ⛔️ <b>Бан навсегда / Кик из клана и чата без права возврата!</b>\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🤖 <b>ОБЖАЛОВАНИЕ НАКАЗАНИЙ:</b>\n"
+    "Любое наказание (варн, мут, бан) можно обжаловать в нашем официальном боте:\n"
+    "👉 <b>@ZRGG_Oblivion_bot</b> 👈\n\n"
+    "#правила #клан #важное #ZRG"
+)
+
+
 # ================= 6. НАСТРОЙКА ЧАТА =================
-@router.message(Cmd("правила", "rules", section=S_CHAT, group_only=True, usage="правила", desc="Правила чата"))
+@router.message(Cmd("правила", "правила клана", "rules", "правила чата", "наши правила", section=S_CHAT, group_only=True, usage="правила", desc="Правила клана и чата"))
 async def rules_show(message: Message, **kw):
     txt = await db.get_setting(message.chat.id, "rules")
     if not txt:
-        return await message.reply("Правила не установлены.\n"
-                                   "Установить: <code>установить правила Текст</code>")
-    await message.reply(f"📜 <b>Правила чата</b>\n\n{txt}")
+        txt = DEFAULT_CLAN_RULES
+        await db.set_setting(message.chat.id, "rules", txt)
+    await message.reply(txt, disable_web_page_preview=True)
 
 
-@router.message(Cmd("установить правила", "изменить правила", section=S_CHAT, rank=3,
+@router.message(Cmd("установить правила", "+правила", "изменить правила", "задать правила", section=S_CHAT, rank=3,
                     usage="установить правила {текст}", desc="Задать правила"))
 async def rules_set(message: Message, bot: Bot, args: str = "", **kw):
     if not await require(message, bot, 3):
         return
     txt = args or (message.reply_to_message.text if message.reply_to_message else "")
     if not txt:
-        return await message.reply("Укажите текст правил.")
+        return await message.reply("Укажите текст правил: <code>установить правила [текст]</code>")
     await db.set_setting(message.chat.id, "rules", txt)
-    await message.reply("✅ Правила обновлены.")
+    await message.reply("✅ <b>Правила успешно обновлены!</b>", disable_web_page_preview=True)
+
+
+@router.message(Cmd("автоправила", "установить автоправила", "отправить правила", section=S_CHAT, rank=3,
+                    usage="автоправила", desc="Опубликовать и закрепить правила клана в теме правил (топик 5)"))
+async def cmd_auto_rules(message: Message, bot: Bot, **kw):
+    from core_seed import MAIN_CHAT
+    # 1. Сохраняем в базу данных
+    await db.set_setting(message.chat.id, "rules", DEFAULT_CLAN_RULES)
+    if message.chat.id != MAIN_CHAT:
+        await db.set_setting(MAIN_CHAT, "rules", DEFAULT_CLAN_RULES)
+
+    # 2. Публикуем в тему правил (топик 5) основного чата
+    sent_count = 0
+    rules_topic_id = 5
+    for target_chat in {MAIN_CHAT, message.chat.id}:
+        if target_chat < 0:
+            try:
+                msg = await bot.send_message(
+                    target_chat,
+                    DEFAULT_CLAN_RULES,
+                    message_thread_id=rules_topic_id,
+                    disable_web_page_preview=True
+                )
+                try:
+                    await bot.pin_chat_message(target_chat, msg.message_id)
+                except Exception:
+                    pass
+                sent_count += 1
+            except Exception:
+                try:
+                    msg = await bot.send_message(
+                        target_chat,
+                        DEFAULT_CLAN_RULES,
+                        disable_web_page_preview=True
+                    )
+                    try:
+                        await bot.pin_chat_message(target_chat, msg.message_id)
+                    except Exception:
+                        pass
+                    sent_count += 1
+                except Exception:
+                    pass
+
+    await message.reply(
+        f"✅ <b>Правила клана успешно сформированы и опубликованы!</b>\n\n"
+        f"📌 <b>Отправлено от имени бота Кузя в тему правил:</b>\n"
+        f"👉 <a href=\"https://t.me/c/3934033202/5\">Тема правил (топик 5)</a>\n\n"
+        f"💾 Текст правил также сохранён в памяти бота и доступен по команде <code>правила</code>.",
+        disable_web_page_preview=True
+    )
 
 
 @router.message(Cmd("приветствие", "greeting", section=S_CHAT, usage="приветствие",
@@ -401,10 +489,10 @@ async def topic(message: Message, bot: Bot, args: str = "", **kw):
 
     if here and here == gram_t:
         return await message.reply(
-            "💊 <b>Эта тема: граммы и игры</b>\n\n"
-            "Здесь работают команды граммов.\n"
+            "🌑 <b>Эта тема: монеты, бизнесы и игры</b>\n\n"
+            "Здесь работают команды монет и рынок.\n"
             "Баланс: <code>б</code> · Игры: <code>игры</code>\n"
-            "Бонус: <code>бонус граммы</code>")
+            "Бизнесы: <code>бизнесы</code> · Бонус: <code>бонус</code>")
 
     if here and here == sms_t:
         return await message.reply(
@@ -425,7 +513,7 @@ async def topic(message: Message, bot: Bot, args: str = "", **kw):
                  + (topic_link(message.chat.id, sms_t) if sms_t else "не задана (напишите <code>тема смс</code>)"))
     lines.append(f"📝 Описания: "
                  + (topic_link(message.chat.id, form_t) if form_t else "не задана"))
-    lines.append(f"💊 Граммы: "
+    lines.append(f"🌑 Монеты: "
                  + (topic_link(message.chat.id, gram_t) if gram_t else "не задана"))
     await message.reply("\n".join(lines), disable_web_page_preview=True)
 

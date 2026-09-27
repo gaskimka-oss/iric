@@ -83,7 +83,7 @@ async def cb_captcha(call: CallbackQuery):
 async def main_text(name: str | None, u) -> str:
     return (f"👋 Привет, {html.escape(name or 'друг')}!\n\n"
             f"<b>ZRGOblivion</b> — модерация, ранги, экономика и игры для вашей беседы.\n\n"
-            f"🍬 Ваши ириски: <b>{money(u['balance'])}</b>\n\n"
+            f"🌑 Ваш баланс: <b>{money(u['balance'])}</b>\n\n"
             f"Выберите раздел ниже 👇")
 
 
@@ -92,11 +92,10 @@ async def main_kb(uid: int = 0) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="➕ Добавить в беседу", callback_data="mm:add"),
          InlineKeyboardButton(text="⚙️ Установка", callback_data="mm:setup")],
-        [InlineKeyboardButton(text="🍬 Что такое ириски", callback_data="mm:iris"),
-         InlineKeyboardButton(text="🛒 Купить ириски", callback_data="mm:shop")],
+        [InlineKeyboardButton(text="🏢 Бизнесы и рынок", callback_data="mm:biz"),
+         InlineKeyboardButton(text="🎮 Игры и казино", callback_data="mm:grams")],
         [InlineKeyboardButton(text="🏆 Топ дня", callback_data="mm:topday"),
          InlineKeyboardButton(text="💬 Супертоп бесед", callback_data="mm:topchats")],
-        [InlineKeyboardButton(text="💊 Граммы и игры", callback_data="mm:grams")],
         [InlineKeyboardButton(text="🎁 Бонусы", callback_data="mm:bonus"),
          InlineKeyboardButton(text="📖 Команды", callback_data="mm:cmds")],
     ]
@@ -131,28 +130,29 @@ async def cmd_start(message: Message):
 
 
 async def grams_text(uid: int) -> str:
-    from h_grams import DAILY_CD, DAILY_GRAMS, GRAM, g
-    bal = await db.get_grams(uid)
+    from h_grams import DAILY_CD, DAILY_COINS, COIN, c
+    bal = await db.get_coins(uid)
     left = await db.cooldown_left(uid, "gram_daily", DAILY_CD)
     from utils import hms
     status = (f"⏳ Следующий бонус через <b>{hms(left)}</b>" if left
               else f"🎁 <b>Бонус готов!</b> Нажмите кнопку ниже")
-    return (f"{GRAM} <b>Граммы и игры</b>\n\n"
-            f"💰 Ваш баланс: <b>{g(bal)}</b>\n\n"
+    return (f"{COIN} <b>Монеты и игры</b>\n\n"
+            f"💰 Ваш баланс: <b>{c(bal)}</b>\n\n"
             f"{status}\n\n"
-            f"<b>Каждые 24 часа — {DAILY_GRAMS:,} граммов</b>\n\n".replace(",", " ") +
-            f"🎮 Игры: орёл, мины, дартс, краш, колесо, сапёр, рулетка\n"
-            f"👑 Выпка на 5 дней — 100 000 граммов\n\n"
-            f"<i>Играть можно в чате командой</i> <code>игры</code>")
+            f"<b>Каждые 24 часа — {DAILY_COINS:,} 🌑</b>\n\n".replace(",", " ") +
+            f"🎮 Игры: слоты, мины, дартс, краш, колесо, сапёр, рулетка, кубик\n"
+            f"🏢 Бизнесы: фермы, заводы, шахты, аренда домов и др.\n"
+            f"👑 Выпка на 5 дней — 100 000 🌑\n\n"
+            f"<i>Играть можно в чате командой</i> <code>игры</code> или <code>бизнесы</code>")
 
 
 async def grams_kb(uid: int) -> InlineKeyboardMarkup:
-    from h_grams import DAILY_CD, DAILY_GRAMS, GRAM
+    from h_grams import DAILY_CD, DAILY_COINS, COIN
     left = await db.cooldown_left(uid, "gram_daily", DAILY_CD)
     rows = []
     if not left:
         rows.append([InlineKeyboardButton(
-            text=f"🎁 Забрать {DAILY_GRAMS:,} {GRAM}".replace(",", " "),
+            text=f"🎁 Забрать {DAILY_COINS:,} {COIN}".replace(",", " "),
             callback_data="gbonus")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="mm:grams")])
     rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="mm:main")])
@@ -161,21 +161,21 @@ async def grams_kb(uid: int) -> InlineKeyboardMarkup:
 
 @router.callback_query(F.data == "gbonus")
 async def cb_gram_bonus(call: CallbackQuery):
-    from h_grams import DAILY_CD, DAILY_GRAMS, g
+    from h_grams import DAILY_CD, DAILY_COINS, c
     uid = call.from_user.id
     left = await db.cooldown_left(uid, "gram_daily", DAILY_CD)
     if left:
         from utils import hms
         return await call.answer(f"Бонус уже получен.\nЖдите {hms(left)}", show_alert=True)
-    bal = await db.add_grams(uid, DAILY_GRAMS, "gram_daily")
+    bal = await db.add_coins(uid, DAILY_COINS, "gram_daily")
     await db.set_cooldown(uid, "gram_daily")
     await call.message.edit_text(
         f"🎉 <b>Бонус получен!</b>\n\n"
-        f"Начислено: <b>+{g(DAILY_GRAMS)}</b>\n"
-        f"Баланс: <b>{g(bal)}</b>\n\n"
+        f"Начислено: <b>+{c(DAILY_COINS)}</b>\n"
+        f"Баланс: <b>{c(bal)}</b>\n\n"
         f"<i>Следующий через 24 часа.</i>",
         reply_markup=await grams_kb(uid))
-    await call.answer("🎁 +100 000 граммов!")
+    await call.answer(f"🎁 +{DAILY_COINS:,} 🌑!".replace(",", " "))
 
 
 @router.message(Cmd("меню", "menu", section=32, usage="меню", desc="Главное меню бота"))
@@ -189,13 +189,12 @@ async def cmd_menu(message: Message, **kw):
 
 
 async def _ensure_keyboard(message: Message) -> None:
-    """Держим нижнее меню открытым: если пропало — вернём."""
+    """Держим нижнее меню открытым."""
     try:
-        await message.answer("⌨️ Меню внизу экрана",
+        await message.answer("⌨️ Меню доступно в кнопках ниже",
                              reply_markup=await kb.main_menu(message.from_user.id))
     except Exception:
         pass
-    await _ensure_keyboard(message)
 
 
 ADD_TEXT = """➕ <b>Как добавить бота в беседу</b>
@@ -238,44 +237,45 @@ SETUP_TEXT = """⚙️ <b>Установка и настройка</b>
 <code>-чат 23:00</code> — авто-закрытие беседы на ночь
 <code>установить правила Текст</code> — правила чата"""
 
-IRIS_TEXT = """🍬 <b>Что такое ириски</b>
+IRIS_TEXT = """🌑 <b>Экономика и имущество</b>
 
-Ириски — внутренняя валюта бота. Их тратят на игры,
-переводы, кланы и покупки.
+В боте действует единая валюта <b>🌑</b>. Зарабатывайте, покупайте бизнес и соревнуйтесь в играх!
 
-<b>Как заработать бесплатно:</b>
-🎁 <code>бонус</code> — раз в сутки (500–2500)
-🛠 <code>работа</code> — раз в час (150–900)
-🕵️ <code>крайм</code> — риск: больше, но можно потерять
-💬 За сообщения в беседе — пассивно
-🏦 <code>банк</code> — 2% в сутки на вклад
+<b>Как заработать:</b>
+🎁 <code>бонус</code> — ежедневный бонус
+🛠 <code>работа</code> — заработок каждый час
+🕵️ <code>крайм</code> — рискованная вылазка
+🏢 <code>бизнесы</code> — покупка заводов, ферм, шахт и пассивный доход
+💰 <code>собрать</code> — сбор накопленной прибыли каждую минуту
+🦹‍♂️ <code>украсть @юзер</code> — ограбление других игроков
+
+<b>Защита средств:</b>
+🛡 <code>скрыть мешок</code> — скрыть мешок от воров на 1–5 часов
 
 <b>Куда потратить:</b>
-🎲 <code>куб 500</code> · 🎰 <code>казино 1к</code> · 🎡 <code>рулетка</code>
-⚔️ <code>дуэль 1000</code> — сразиться с другом
-🏰 <code>создать клан</code> — свой клан
-💝 <code>передать @user 500</code> — подарить
+🏢 Покупка и продажа предприятий на динамическом рынке
+🎰 <code>казик 1к</code> · 🎯 <code>дартс</code> · 💣 <code>мины</code> · 💥 <code>краш</code>
+🎲 <code>кубик</code> · 🎡 <code>рулетка</code> · ⚔️ <code>дуэль</code>
+💝 <code>передать @user 500</code> — перевод валюты
 
-Баланс: <code>баланс</code> · Топ: <code>топ</code>"""
+Баланс: <code>б</code> или <code>баланс</code> · Топ: <code>топ</code>"""
 
 BONUS_TEXT = """🎁 <b>Бонусы и заработок</b>
 
 <b>Ежедневный бонус</b> — <code>бонус</code>
-500–2500 ириск раз в 24 часа.
-💎 С VIP — удвоенный бонус!
+Раз в 24 часа. С VIP — в 2 раза чаще!
 
 <b>Работа</b> — <code>работа</code>
-150–900 ириск раз в час, без риска.
+Заработок раз в час без риска.
 
 <b>Криминал</b> — <code>крайм</code>
-55% успех: 400–3000. Провал: штраф.
+55% успех. Провал: штраф.
 
-<b>Банк</b> — <code>банк</code>
-<code>положить 5000</code> — 2% в сутки.
+<b>Бизнесы</b> — <code>бизнесы</code>
+Покупка предприятий для пассивного дохода.
 
-<b>Активность</b>
-За сообщения в беседе капают ириски и опыт.
-Уровни: от Новичка до Императора.
+<b>Сбор прибыли</b> — <code>собрать</code>
+Накопленный доход от ваших ферм и заводов.
 
 <b>Репутация</b> — <code>реп</code> реплаем"""
 

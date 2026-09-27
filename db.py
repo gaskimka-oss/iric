@@ -248,6 +248,21 @@ CREATE TABLE IF NOT EXISTS vip_settings (
     color_theme TEXT NOT NULL DEFAULT 'default'
 );
 
+CREATE TABLE IF NOT EXISTS user_businesses (
+    user_id INTEGER NOT NULL,
+    biz_key TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    last_collect INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, biz_key)
+);
+
+CREATE TABLE IF NOT EXISTS game_stats (
+    user_id INTEGER PRIMARY KEY,
+    xp INTEGER NOT NULL DEFAULT 0,
+    games_played INTEGER NOT NULL DEFAULT 0,
+    games_won INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS relationships (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user1_id INTEGER NOT NULL,
@@ -368,6 +383,17 @@ async def init() -> None:
     await _conn.execute("PRAGMA foreign_keys=ON")
     await _conn.executescript(SCHEMA)
     await _migrate()
+    # Миграция: объединяем любые старые балансы из grams и coins в единый balance
+    try:
+        await _conn.execute("UPDATE users SET balance = balance + grams WHERE grams > 0")
+        await _conn.execute("UPDATE users SET grams = 0 WHERE grams > 0")
+    except Exception:
+        pass
+    try:
+        await _conn.execute("UPDATE users SET balance = balance + coins WHERE coins > 0")
+        await _conn.execute("UPDATE users SET coins = 0 WHERE coins > 0")
+    except Exception:
+        pass
     await _conn.commit()
 
 
@@ -380,7 +406,8 @@ async def _migrate() -> None:
         "mod_log": [("ai_verdict", "TEXT"), ("ai_score", "INTEGER DEFAULT 0"),
                     ("ai_reason", "TEXT"), ("ai_advice", "TEXT")],
         "users": [("verified", "INTEGER NOT NULL DEFAULT 0"),
-                  ("grams", "INTEGER NOT NULL DEFAULT 0")],
+                  ("grams", "INTEGER NOT NULL DEFAULT 0"),
+                  ("coins", "INTEGER NOT NULL DEFAULT 0")],
         "relations": [("count", "INTEGER NOT NULL DEFAULT 1")],
         "profiles": [("gender", "TEXT"), ("custom", "TEXT"), ("custom_by", "INTEGER"),
                      ("custom_ts", "INTEGER"),
@@ -461,9 +488,17 @@ async def touch_user(user_id: int, username: str | None, first_name: str | None)
                 (r["chat_id"], user_id, r["rank"], int(__import__("time").time())))
 
 
+async def get_balance(user_id: int) -> int:
+    row = await fetchone("SELECT balance FROM users WHERE user_id=?", (user_id,))
+    if not row:
+        u = await get_user(user_id)
+        return int(u["balance"]) if u else 0
+    return int(row["balance"])
+
+
 async def add_balance(user_id: int, amount: int, action: str = "", meta: str = "") -> int:
     await get_user(user_id)
-    await execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
+    await execute("UPDATE users SET balance = MAX(0, balance + ?) WHERE user_id=?", (amount, user_id))
     if action:
         await execute(
             "INSERT INTO log (user_id, action, amount, meta, ts) VALUES (?,?,?,?,?)",
@@ -473,9 +508,47 @@ async def add_balance(user_id: int, amount: int, action: str = "", meta: str = "
     return row["balance"] if row else 0
 
 
-async def set_balance(user_id: int, amount: int) -> None:
+async def set_balance(user_id: int, amount: int) -> int:
     await get_user(user_id)
     await execute("UPDATE users SET balance=? WHERE user_id=?", (max(0, amount), user_id))
+    return max(0, amount)
+
+
+# --- Алиасы для полной совместимости со всеми модулями ---
+async def get_grams(user_id: int) -> int:
+    return await get_balance(user_id)
+
+
+async def add_grams(user_id: int, amount: int, action: str = "", meta: str = "") -> int:
+    return await add_balance(user_id, amount, action, meta)
+
+
+async def set_grams(user_id: int, amount: int) -> int:
+    return await set_balance(user_id, amount)
+
+
+async def get_coins(user_id: int) -> int:
+    return await get_balance(user_id)
+
+
+async def add_coins(user_id: int, amount: int, action: str = "", meta: str = "") -> int:
+    return await add_balance(user_id, amount, action, meta)
+
+
+async def set_coins(user_id: int, amount: int) -> int:
+    return await set_balance(user_id, amount)
+
+
+async def get_comets(user_id: int) -> int:
+    return await get_balance(user_id)
+
+
+async def add_comets(user_id: int, amount: int, action: str = "", meta: str = "") -> int:
+    return await add_balance(user_id, amount, action, meta)
+
+
+async def set_comets(user_id: int, amount: int) -> int:
+    return await set_balance(user_id, amount)
 
 
 async def add_xp(user_id: int, amount: int) -> None:
@@ -528,27 +601,6 @@ async def set_setting(chat_id: int, key: str, value: str) -> None:
         "INSERT INTO settings (chat_id, key, value) VALUES (?,?,?) "
         "ON CONFLICT(chat_id, key) DO UPDATE SET value=excluded.value",
         (chat_id, key, value))
-
-
-# --- Граммы (вторая валюта) ----------------------------------------------
-async def get_grams(user_id: int) -> int:
-    await get_user(user_id)
-    row = await fetchone("SELECT grams FROM users WHERE user_id=?", (user_id,))
-    return int(row["grams"]) if row else 0
-
-
-async def add_grams(user_id: int, amount: int, action: str = "",
-                    meta: str = "") -> int:
-    await get_user(user_id)
-    await execute("UPDATE users SET grams = MAX(0, grams + ?) WHERE user_id=?",
-                  (amount, user_id))
-    if action:
-        import time as _t
-        await execute(
-            "INSERT INTO log (user_id, action, amount, meta, ts) VALUES (?,?,?,?,?)",
-            (user_id, action, amount, meta, int(_t.time())))
-    row = await fetchone("SELECT grams FROM users WHERE user_id=?", (user_id,))
-    return int(row["grams"]) if row else 0
 
 
 # --- VIP & VIP+ -----------------------------------------------------------
@@ -806,5 +858,130 @@ async def count_friends(uid: int) -> int:
     row = await fetchone(
         "SELECT COUNT(*) c FROM friends WHERE user1_id=? OR user2_id=?", (uid, uid))
     return int(row["c"]) if row else 0
+
+
+# --- Кометы (валюта comets / comets engine) -----------------------------
+async def get_comets(user_id: int) -> int:
+    return await get_grams(user_id)
+
+
+async def add_comets(user_id: int, amount: int, action: str = "", meta: str = "") -> int:
+    return await add_grams(user_id, amount, action, meta)
+
+
+async def set_comets(user_id: int, amount: int) -> int:
+    return await set_grams(user_id, amount)
+
+
+# --- Игровой уровень и XP -----------------------------------------------
+GAME_LVL_THRESHOLDS = [
+    (1, 0),
+    (2, 10),
+    (3, 25),
+    (4, 50),
+    (5, 90),
+    (6, 150),
+    (7, 230),
+    (8, 330),
+    (9, 450),
+    (10, 600),
+    (11, 800),
+    (12, 1050),
+    (13, 1350),
+    (14, 1700),
+    (15, 2100),
+]
+
+
+def _calc_game_lvl(xp: int) -> tuple[int, int, int]:
+    """Возвращает (level, next_xp_req, cur_level_base_xp)."""
+    cur_lvl = 1
+    cur_base = 0
+    next_req = 10
+    for lvl, req in GAME_LVL_THRESHOLDS:
+        if xp >= req:
+            cur_lvl = lvl
+            cur_base = req
+        else:
+            next_req = req
+            break
+    else:
+        next_req = cur_base + cur_lvl * 100
+    return cur_lvl, next_req, cur_base
+
+
+async def get_game_profile(user_id: int) -> dict:
+    await get_user(user_id)
+    row = await fetchone("SELECT xp, games_played, games_won FROM game_stats WHERE user_id=?", (user_id,))
+    if not row:
+        return {"xp": 0, "level": 1, "next_xp": 10, "cur_base": 0, "games_played": 0, "games_won": 0, "progress_pct": 0}
+    xp = int(row["xp"] or 0)
+    lvl, next_xp, cur_base = _calc_game_lvl(xp)
+    played = int(row["games_played"] or 0)
+    won = int(row["games_won"] or 0)
+    denom = max(1, next_xp - cur_base)
+    progress_pct = min(100, max(0, int(((xp - cur_base) / denom) * 100)))
+    return {
+        "xp": xp,
+        "level": lvl,
+        "next_xp": next_xp,
+        "cur_base": cur_base,
+        "games_played": played,
+        "games_won": won,
+        "progress_pct": progress_pct
+    }
+
+
+async def add_game_xp(user_id: int, xp_amount: int = 1, is_win: bool = False) -> tuple[int, bool]:
+    """Начисляет игровой опыт и возвращает (новый_уровень, повысился_ли_уровень)."""
+    await get_user(user_id)
+    win_add = 1 if is_win else 0
+    row = await fetchone("SELECT xp FROM game_stats WHERE user_id=?", (user_id,))
+    old_xp = int(row["xp"] or 0) if row else 0
+    old_lvl, _, _ = _calc_game_lvl(old_xp)
+    
+    new_xp = old_xp + xp_amount
+    new_lvl, _, _ = _calc_game_lvl(new_xp)
+    
+    await execute(
+        "INSERT INTO game_stats (user_id, xp, games_played, games_won) VALUES (?, ?, 1, ?) "
+        "ON CONFLICT(user_id) DO UPDATE SET xp=xp+?, games_played=games_played+1, games_won=games_won+?",
+        (user_id, new_xp, win_add, xp_amount, win_add)
+    )
+    return new_lvl, (new_lvl > old_lvl)
+
+
+# --- Предприятия и имущество за Кометы ---------------------------------
+async def get_user_businesses(user_id: int) -> dict[str, dict]:
+    """Возвращает {biz_key: {'count': count, 'last_collect': last_collect}}."""
+    rows = await fetchall("SELECT biz_key, count, last_collect FROM user_businesses WHERE user_id=? AND count > 0", (user_id,))
+    res = {}
+    for r in rows:
+        res[r["biz_key"]] = {"count": int(r["count"]), "last_collect": int(r["last_collect"] or 0)}
+    return res
+
+
+async def change_user_business(user_id: int, biz_key: str, count_delta: int) -> int:
+    now = int(time.time())
+    row = await fetchone("SELECT count, last_collect FROM user_businesses WHERE user_id=? AND biz_key=?", (user_id, biz_key))
+    if not row:
+        new_cnt = max(0, count_delta)
+        if new_cnt > 0:
+            await execute("INSERT INTO user_businesses (user_id, biz_key, count, last_collect) VALUES (?, ?, ?, ?)",
+                          (user_id, biz_key, new_cnt, now))
+        return new_cnt
+    else:
+        new_cnt = max(0, int(row["count"]) + count_delta)
+        if new_cnt == 0:
+            await execute("DELETE FROM user_businesses WHERE user_id=? AND biz_key=?", (user_id, biz_key))
+        else:
+            await execute("UPDATE user_businesses SET count=? WHERE user_id=? AND biz_key=?", (new_cnt, user_id, biz_key))
+        return new_cnt
+
+
+async def update_business_collect_time(user_id: int, biz_keys: list[str]) -> None:
+    now = int(time.time())
+    for k in biz_keys:
+        await execute("UPDATE user_businesses SET last_collect=? WHERE user_id=? AND biz_key=?", (now, user_id, k))
 
 

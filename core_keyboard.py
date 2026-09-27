@@ -13,9 +13,9 @@ from aiogram.types import (KeyboardButton, ReplyKeyboardMarkup,
 # обрабатывается обычными хэндлерами, ничего дублировать не нужно.
 BTN_ADMIN = "🛡 Админ-панель"
 BTN_MENU = "📋 Меню"
-BTN_BALANCE = "🍬 Баланс"
+BTN_BALANCE = "🌑 Баланс"
 BTN_BONUS = "🎁 Бонус"
-BTN_GRAMS = "💊 Граммы"
+BTN_BIZ = "🏢 Бизнесы"
 BTN_GAMES = "🎮 Игры"
 BTN_PROFILE = "📝 Описание"
 BTN_HELP = "📖 Команды"
@@ -26,7 +26,26 @@ ALIASES: dict[str, str] = {
     BTN_MENU: "меню",
     BTN_BALANCE: "баланс",
     BTN_BONUS: "бонус",
-    BTN_GRAMS: "б",
+    BTN_BIZ: "бизнесы",
+    "🏢 Бизнесы": "бизнесы",
+    "бизнесы": "бизнесы",
+    "бизнес": "бизнесы",
+    "рынок": "бизнесы",
+    "предприятия": "бизнесы",
+    "имущество": "бизнесы",
+    "собрать": "собрать",
+    "прибыль": "собрать",
+    "🌑 Баланс": "баланс",
+    "🍬 Баланс": "баланс",
+    "баланс": "баланс",
+    "бонус": "бонус",
+    "монеты": "баланс",
+    "коины": "баланс",
+    "граммы": "баланс",
+    "кометы": "баланс",
+    "🌑 Монеты": "баланс",
+    "💊 Граммы": "баланс",
+    "🪙 Монеты": "баланс",
     BTN_GAMES: "игры",
     BTN_PROFILE: "описание",
     BTN_HELP: "команды",
@@ -43,7 +62,7 @@ async def main_menu(uid: int = 0) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=BTN_MENU), KeyboardButton(text=BTN_HELP)],
         [KeyboardButton(text=BTN_BALANCE), KeyboardButton(text=BTN_BONUS)],
-        [KeyboardButton(text=BTN_GRAMS), KeyboardButton(text=BTN_GAMES)],
+        [KeyboardButton(text=BTN_BIZ), KeyboardButton(text=BTN_GAMES)],
         [KeyboardButton(text=BTN_PROFILE)],
     ]
     if uid:

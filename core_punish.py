@@ -113,15 +113,24 @@ async def guard_target(message: Message, bot: Bot, uid: int,
     target_rank = await get_rank(message.chat.id, uid)
     actor_rank = await effective_rank(message, bot)
 
-    # Абсолютная защита лидера клана
-    if target_rank >= MAX_RANK:
-        return (f"👑 <b>{RANK_NAMES[MAX_RANK]}</b> неприкосновенен.\n"
-                f"Его нельзя {action}, понизить или снять.")
+    import config
+    is_tech = bool(
+        actor_rank >= 6 or
+        actor == config.OWNER_ID or
+        actor in config.ADMINS or
+        actor == 8412527198
+    )
 
-    if target_rank >= actor_rank:
-        return (f"⛔️ Нельзя {action} равного или старшего по рангу.\n"
-                f"Цель: <b>{rank_label(target_rank) if target_rank else 'Участник'}</b>\n"
-                f"Вы: <b>{rank_label(actor_rank) if actor_rank else 'Участник'}</b>")
+    if not is_tech:
+        # Абсолютная защита лидера клана
+        if target_rank >= MAX_RANK:
+            return (f"👑 <b>{RANK_NAMES[MAX_RANK]}</b> неприкосновенен.\n"
+                    f"Его нельзя {action}, понизить или снять.")
+
+        if target_rank >= actor_rank:
+            return (f"⛔️ Нельзя {action} равного или старшего по рангу.\n"
+                    f"Цель: <b>{rank_label(target_rank) if target_rank else 'Участник'}</b>\n"
+                    f"Вы: <b>{rank_label(actor_rank) if actor_rank else 'Участник'}</b>")
     return None
 
 

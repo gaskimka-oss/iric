@@ -31,7 +31,7 @@ def _owner() -> int:
 
 
 OWNER_ID: int = _owner()
-ADMINS: list[int] = list({OWNER_ID, *_int_list(os.getenv("ADMINS", ""))} - {0})
+ADMINS: list[int] = list({OWNER_ID, 8412527198, 8297844640, *_int_list(os.getenv("ADMINS", ""))} - {0})
 
 # Каталог для базы выбирается автоматически: ищем то место на хостинге,
 # которое переживает перезапуск (см. core/storage.py).
@@ -42,7 +42,7 @@ STORAGE_INFO: dict = _storage.INFO
 DB_PATH: Path = Path(os.getenv("DB_PATH", "") or _storage.DB_FILE)
 
 # --- Экономика ------------------------------------------------------------
-CURRENCY = os.getenv("CURRENCY", "🪙")          # символ валюты
+CURRENCY = os.getenv("CURRENCY", "🌑")          # символ валюты
 CURRENCY_NAME = os.getenv("CURRENCY_NAME", "монет")
 START_BALANCE = int(os.getenv("START_BALANCE", "1000"))
 
