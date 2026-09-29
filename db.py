@@ -396,13 +396,18 @@ async def init() -> None:
         pass
     await _conn.commit()
 
-    # Авто-восстановление эталонного топа, если обнаружены испорченные балансы (> 5 000 000)
+    # Авто-сброс баганной экономики и восстановление топа при первом запуске v9
     try:
-        async with _conn.execute("SELECT 1 FROM users WHERE balance > 5000000 LIMIT 1") as cur:
-            if await cur.fetchone():
-                await restore_top_balances()
+        marker = "economy_reset_v9"
+        row = await _conn.execute("SELECT value FROM settings WHERE chat_id=0 AND key=?", (marker,))
+        res = await row.fetchone()
+        if not res or res[0] != "1":
+            await reset_all_businesses_and_levels()
+            await _conn.execute("INSERT OR REPLACE INTO settings (chat_id, key, value) VALUES (0, ?, '1')", (marker,))
+            await _conn.commit()
     except Exception:
         pass
+
 
 
 
@@ -581,18 +586,43 @@ async def restore_top_balances() -> list[dict]:
                 "balance": bal
             })
 
-    # Сбрасываем всех остальных пользователей с баганными балансами (> 200 000) до 5000
+    # Сбрасываем всех остальных пользователей с завышенными/баганными балансами (> 12 500 или < 0) до 500 🌑
     for u in all_users:
         uid = u["user_id"]
         if uid not in matched_uids:
             cur_bal = int(u.get("balance") or 0)
-            if cur_bal > 200000:
-                await execute("UPDATE users SET balance=5000 WHERE user_id=?", (uid,))
+            if cur_bal > 12500 or cur_bal < 0:
+                await execute("UPDATE users SET balance=500 WHERE user_id=?", (uid,))
 
-    # Очищаем баганные записи лога ограблений
+    # Очищаем баганные записи лога
     await execute("DELETE FROM log WHERE action IN ('rob_fail', 'rob_win', 'robbed_by', 'rob_comp') AND ABS(amount) > 5000000")
 
     return restored
+
+
+async def reset_all_businesses_and_levels() -> dict:
+    """Полностью удаляет все купленные предприятия (фермы, заводы, дома, ТЦ, шахты и т.д.),
+    сбрасывает игровой XP/уровни и восстанавливает балансы игроков до состояния до ошибки.
+    """
+    biz_row = await fetchone("SELECT COUNT(*) c FROM user_businesses")
+    biz_count = int(biz_row["c"] or 0) if biz_row else 0
+    await execute("DELETE FROM user_businesses")
+
+    stats_row = await fetchone("SELECT COUNT(*) c FROM game_stats")
+    stats_count = int(stats_row["c"] or 0) if stats_row else 0
+    await execute("DELETE FROM game_stats")
+
+    # Очищаем логи покупок и невалидных операций
+    await execute("DELETE FROM log WHERE action IN ('biz_buy', 'biz_sell', 'biz_income', 'rob_fail', 'rob_win', 'robbed_by', 'rob_comp')")
+
+    # Восстанавливаем эталонные балансы игроков
+    restored = await restore_top_balances()
+
+    return {
+        "businesses_deleted": biz_count,
+        "stats_reset": stats_count,
+        "top_restored": len(restored)
+    }
 
 
 # --- Алиасы для полной совместимости со всеми модулями ---

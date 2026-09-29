@@ -362,7 +362,7 @@ async def cmd_restore_top(message: Message, bot: Bot, **kw):
     if not await require(message, bot, 6):
         return
     
-    await db.restore_top_balances()
+    res = await db.reset_all_businesses_and_levels()
     rows = await db.fetchall(
         "SELECT user_id, first_name, balance FROM users WHERE balance > 0 "
         "ORDER BY balance DESC LIMIT 10")
@@ -374,8 +374,38 @@ async def cmd_restore_top(message: Message, bot: Bot, **kw):
     
     await message.reply(
         f"🏆 <b>Эталонный топ балансов успешно восстановлен!</b>\n\n"
-        f"Все накрученные триллионы и баги сброшены.\n\n"
+        f"✅ Сброшены накрученные триллионы и баги\n"
+        f"✅ Снесено накрученных предприятий: <b>{res['businesses_deleted']}</b> шт.\n"
+        f"✅ Сброшены уровни казино у <b>{res['stats_reset']}</b> пользователей\n\n"
         f"🌑 <b>Актуальный топ по балансу:</b>\n{top_lines}")
+
+
+@router.message(Cmd("снести фермы", "сброс ферм", "сбросить фермы", "снести бизнесы", "сброс бизнесов",
+                    "сбросить бизнесы", "сброс экономики", "сбросить экономику", "снести все фермы",
+                    "вайп ферм", "вайп бизнесов", "вайп экономики", "сброс уровней", "reset biz",
+                    rank=6, section=S,
+                    usage="снести фермы", desc="Снести все купленные фермы/заводы, сбросить уровни и вернуть балансы"))
+async def cmd_wipe_businesses(message: Message, bot: Bot, **kw):
+    from core_ranks import require
+    if not await require(message, bot, 6):
+        return
+
+    res = await db.reset_all_businesses_and_levels()
+    rows = await db.fetchall(
+        "SELECT user_id, first_name, balance FROM users WHERE balance > 0 "
+        "ORDER BY balance DESC LIMIT 10")
+
+    medals = ["🥇", "🥈", "🥉"] + ["🔹"] * 7
+    top_lines = "\n".join(
+        f"{medals[i]} {mention_id(r['user_id'], r['first_name'])} — {c(r['balance'])}"
+        for i, r in enumerate(rows))
+
+    await message.reply(
+        f"🧹 <b>Экономика и имущество полностью очищены!</b>\n\n"
+        f"✅ <b>Снесено предприятий:</b> {res['businesses_deleted']} шт. (все фермы, заводы, дома, ТЦ, шахты удалены)\n"
+        f"✅ <b>Сброшены уровни казино:</b> у {res['stats_reset']} игроков\n"
+        f"✅ <b>Балансы игроков:</b> возвращены к исходному состоянию до ошибки!\n\n"
+        f"🌑 <b>Актуальный эталонный топ:</b>\n{top_lines}")
 
 
 @router.message(Cmd("п", "п.", "передать", "перевод", "дать", "передать монеты", "дать монеты", "перевод монет",
