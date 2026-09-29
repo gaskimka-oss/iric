@@ -19,37 +19,19 @@ from core_ranks import require
 from core_registry import Cmd
 from core_resolve import human_period, parse_period, resolve_target
 from utils import hms, level_of, mention, mention_id, money, parse_amount
+from h_grams import topic_ok
 
 router = Router(name="fun")
 S_BONUS, S_FUN, S_DUEL, S_CUBE = 13, 14, 15, 16
 
 
 # ---------- 13. Работа, крайм и ограбления ----------
-CASINO_TOPIC_ID = 132681
-CASINO_TOPIC_URL = "https://t.me/c/3934033202/132681"
-
-
 @router.message(Cmd("работа", "работать", "пахать", "work", section=S_BONUS,
                     usage="работа", desc="Заработать средства (только в теме Казино)"))
 async def cmd_work(message: Message, **kw):
+    if not await topic_ok(message):
+        return
     uid = message.from_user.id
-
-    # Ограничение по теме (топику) казино
-    if message.chat.type != "private":
-        thread_id = getattr(message, "message_thread_id", None)
-        if thread_id and thread_id != CASINO_TOPIC_ID:
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            from h_userinfo import _autodel
-            warn = await message.answer(
-                f"⚠️ {mention(message.from_user)}, команду <code>работа</code> можно использовать только в теме:\n"
-                f"🎰 <a href=\"{CASINO_TOPIC_URL}\">Казино / Работа</a>\n\n"
-                f"👉 Перейдите в нужную тему, чтобы заработать монеты!",
-                disable_web_page_preview=True)
-            _autodel(warn, 60)
-            return
 
     left = await db.cooldown_left(uid, "work", WORK_COOLDOWN)
     if left:
@@ -79,8 +61,10 @@ async def cmd_work(message: Message, **kw):
 
 
 @router.message(Cmd("крайм", "преступление", "рискнуть", section=S_BONUS,
-                    usage="крайм", desc="Рискованный заработок"))
+                    usage="крайм", desc="Рискованный заработок (только в теме Казино)"))
 async def cmd_crime(message: Message, **kw):
+    if not await topic_ok(message):
+        return
     uid = message.from_user.id
     left = await db.cooldown_left(uid, "crime", CRIME_COOLDOWN)
     if left:
@@ -98,8 +82,10 @@ async def cmd_crime(message: Message, **kw):
 
 @router.message(Cmd("украсть", "ограбить", "вор", "кража", "rob", "steal", "грабеж", "грабёж",
                     section=S_BONUS, usage="украсть {ссылка} [сумма]",
-                    desc="Попробовать украсть средства у игрока"))
+                    desc="Попробовать украсть средства у игрока (только в теме Казино)"))
 async def cmd_rob(message: Message, bot: Bot, args: str = "", **kw):
+    if not await topic_ok(message):
+        return
     robber_id = message.from_user.id
     uid, name, rest = await resolve_target(message, args, bot)
     if not uid:
@@ -137,18 +123,17 @@ async def cmd_rob(message: Message, bot: Bot, args: str = "", **kw):
     if u_victim["balance"] < 50:
         return await message.reply(f"У {mention_id(uid, name)} в карманах пусто (меньше {money(50)}). Красть нечего!")
 
-    # Расчёт суммы
+    # Расчёт суммы (гарантированно положительное число)
     max_steal = min(u_victim["balance"], 50000)
     raw_amount = parse_amount(rest, u_victim["balance"])
     if raw_amount and raw_amount > 0:
-        amount = min(raw_amount, max_steal)
+        amount = max(1, min(int(raw_amount), max_steal))
     else:
         # По умолчанию случайная часть (15-30% от баланса жертвы, не более 10000)
         pct = random.uniform(0.15, 0.30)
         amount = max(50, min(int(u_victim["balance"] * pct), 10000))
 
-    if amount > u_victim["balance"]:
-        amount = u_victim["balance"]
+    amount = max(1, min(amount, u_victim["balance"]))
 
     # Шанс успеха: базовый 45%, +10% VIP, +20% VIP+
     chance = 0.45
@@ -176,23 +161,27 @@ async def cmd_rob(message: Message, bot: Bot, args: str = "", **kw):
             f"🎲 Вероятность успеха была: <b>{int(chance * 100)}%</b>\n"
             f"🌑 Ваш новый баланс: <b>{money(new_bal)}</b>")
     else:
-        # Провал! Штраф от 50% до 100% от суммы попытки (но не более баланса вора)
+        # Провал! Штраф от 50% до 100% от суммы попытки (но не более баланса вора и строго > 0)
         fine = max(50, min(u_robber["balance"], int(amount * random.uniform(0.5, 1.0))))
+        fine = max(1, fine)
         new_bal = await db.add_balance(robber_id, -fine, "rob_fail", str(uid))
         await db.add_balance(uid, fine, "rob_comp", str(robber_id))
         await message.reply(
             f"🚨 <b>Ограбление провалилось!</b>\n\n"
             f"{mention(message.from_user)} попался с поличным при попытке ограбить {mention_id(uid, name)}!\n"
-            f"👮‍♂️ Полиция конфисковала и передала жертве компенсацию: <b>−{money(fine)}</b> 💸\n\n"
+            f"👮‍♂️ Полиция конфисковала и передала жертве компенсацию: <b>{money(fine)}</b> 💸\n\n"
             f"🌑 Ваш баланс: <b>{money(new_bal)}</b>")
 
 
 @router.message(Cmd("скрыть мешок", "спрятать мешок", "спрятать карманы", "защита мешка", "hidebag", "hide_bag",
                     section=S_BONUS, usage="скрыть мешок", desc="Спрятать мешок от воров на 1-5 часов"))
 async def cmd_hide_bag(message: Message, **kw):
+    if not await topic_ok(message):
+        return
     uid = message.from_user.id
     hide_left = await db.cooldown_left(uid, "bag_hidden", 5 * 3600)
     if hide_left:
+
         return await message.reply(
             f"🛡 <b>Ваш мешок уже спрятан!</b>\n\n"
             f"Защита от ограблений действует ещё: <b>{hms(hide_left)}</b> 🔒")
@@ -309,6 +298,8 @@ _duels: dict[str, dict] = {}
 
 
 async def _bet_of(message: Message, raw: str) -> int | None:
+    if not await topic_ok(message):
+        return None
     u = await db.get_user(message.from_user.id)
     bet = parse_amount(raw, u["balance"], MIN_BET)
     if not bet or bet < MIN_BET:
@@ -326,6 +317,8 @@ async def _bet_of(message: Message, raw: str) -> int | None:
 @router.message(Cmd("дуэль", "битва", "duel", section=S_DUEL, usage="дуэль {ставка} (реплаем)",
                     desc="Вызвать на дуэль"))
 async def cmd_duel(message: Message, bot: Bot, args: str = "", **kw):
+    if not await topic_ok(message):
+        return
     uid, name, rest = await resolve_target(message, args, bot)
     if not uid:
         return await message.reply("Ответьте реплаем на соперника: <code>дуэль 1000</code>")
@@ -374,9 +367,12 @@ async def cb_duel(call: CallbackQuery):
 @router.message(Cmd("топ дуэлей", "топ дуэлянтов", section=S_DUEL, usage="топ дуэлей",
                     desc="Лучшие дуэлянты"))
 async def cmd_duel_top(message: Message, **kw):
+    if not await topic_ok(message):
+        return
     rows = await db.fetchall(
         "SELECT user_id, COUNT(*) w, SUM(amount) s FROM log WHERE action='duel_win' "
         "GROUP BY user_id ORDER BY w DESC LIMIT 10")
+
     if not rows:
         return await message.reply("Дуэлей ещё не было.")
     lines = []
@@ -387,10 +383,11 @@ async def cmd_duel_top(message: Message, **kw):
     await message.reply("⚔️ <b>Топ дуэлянтов</b>\n" + "\n".join(lines))
 
 
-# ---------- 16. Кубы и Казино (Рандом игры) ----------
 @router.message(Cmd("куб", "кубик", "кости", "cube", "dice", section=S_CUBE, usage="куб {ставка}",
-                    desc="Бросить кубик на ириски"))
+                    desc="Бросить кубик на монеты"))
 async def cmd_cube(message: Message, args: str = "", **kw):
+    if not await topic_ok(message):
+        return
     if not args.strip():
         m = await message.answer_dice(emoji="🎲")
         return

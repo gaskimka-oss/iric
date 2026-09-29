@@ -28,48 +28,112 @@ router = Router(name="relations")
 S_REL = 20
 
 # --- Каталог действий прокачки отношений ---
-# key: (название, эмодзи, xp, цена_ирисок, кд_секунд, мин_уровень, глагол)
+# key: (название, эмодзи, xp, цена_монет, кд_секунд, мин_уровень, глагол)
 REL_ACTIONS = {
     "комплимент": ("Сделать комплимент", "💬", 5, 3, 600, 1, "делает нежный комплимент для"),
     "анекдот": ("Рассказать анекдот", "😄", 10, 5, 900, 1, "рассказывает смешной анекдот для"),
     "еда": ("Поделиться едой", "🍟", 20, 10, 1200, 2, "делится вкусной едой с"),
     "мем": ("Кинуть мем", "🖼", 20, 10, 1200, 2, "присылает отборный мем для"),
     "поговорить": ("Поговорить", "💭", 30, 15, 1200, 3, "мило беседует с"),
-    "обнимать": ("Обнимать (подарок)", "🤗", 30, 15, 1200, 3, "крепко обнимает"),
+    "обнимать": ("Обнимать", "🤗", 30, 15, 1200, 3, "крепко обнимает"),
     "шоколад": ("Подарить шоколадку", "🍫", 50, 25, 1800, 4, "дарит вкусную шоколадку для"),
-    "погулять": ("Пригласить погулять", "🚶", 70, 35, 2700, 4, "идёт на романтическую прогулку с"),
+    "погулять": ("Пригласить погулять", "🚶", 70, 35, 2700, 4, "идёт на прогулку с"),
     "завтрак": ("Сделать завтрак", "🍳", 100, 50, 3600, 5, "готовит потрясающий завтрак для"),
-    "конфеты": ("Подарить конфеты", "🍬", 100, 50, 3600, 5, "дарит коробку сладких конфет"),
-    "кино": ("Сходить в кино", "🎬", 200, 100, 7200, 6, "идёт на вечерний киносеанс с"),
+    "конфеты": ("Подарить конфеты", "🍬", 100, 50, 3600, 5, "дарит коробку сладких конфет для"),
+    "цветы": ("Подарить цветы", "💐", 150, 75, 5400, 5, "дарит роскошный букет цветов для"),
+    "кино": ("Сходить в кино", "🎬", 200, 100, 7200, 6, "идёт на киносеанс с"),
     "душа": ("Поговорить по душам", "💞", 300, 150, 10800, 6, "говорит по душам под звёздами с"),
     "клуб": ("Пригласить в клуб", "🎶", 500, 238, 18000, 7, "зажигает в ночном клубе с"),
     "сюрприз": ("Устроить сюрприз", "🎊", 750, 356, 28800, 7, "устраивает грандиозный сюрприз для"),
-    "подарок": ("Сделать большой подарок", "🎁", 3000, 1350, 86400, 8, "вручает роскошный подарок"),
+    "подарок": ("Сделать большой подарок", "🎁", 3000, 1350, 86400, 8, "вручает роскошный подарок для"),
 }
 
 # Синонимы действий
 ACTION_ALIASES = {
     "сделать комплимент": "комплимент",
+    "комплимент": "комплимент",
+    "похвалить": "комплимент",
+    "отн комплимент": "комплимент",
     "рассказать анекдот": "анекдот",
+    "анекдот": "анекдот",
+    "шутка": "анекдот",
+    "пошутить": "анекдот",
+    "отн анекдот": "анекдот",
     "поделиться едой": "еда",
+    "еда": "еда",
+    "покормить": "еда",
+    "угостить": "еда",
+    "отн еда": "еда",
     "кинуть мем": "мем",
+    "мем": "мем",
     "мемы": "мем",
+    "мемчик": "мем",
+    "скинуть мем": "мем",
+    "отн мем": "мем",
     "поговорить": "поговорить",
+    "поболтать": "поговорить",
+    "беседа": "поговорить",
+    "отн поговорить": "поговорить",
     "обнимашки": "обнимать",
+    "обнимать": "обнимать",
+    "обнять": "обнимать",
+    "крепко обнять": "обнимать",
+    "отн обнять": "обнимать",
     "шоколадка": "шоколад",
+    "шоколад": "шоколад",
     "подарить шоколадку": "шоколад",
+    "подарить шоколад": "шоколад",
+    "отн шоколад": "шоколад",
     "гулять": "погулять",
+    "погулять": "погулять",
+    "прогулка": "погулять",
     "пригласить погулять": "погулять",
+    "пойдем гулять": "погулять",
+    "пойти гулять": "погулять",
+    "отн погулять": "погулять",
+    "отн гулять": "погулять",
     "сделать завтрак": "завтрак",
+    "завтрак": "завтрак",
+    "приготовить завтрак": "завтрак",
+    "отн завтрак": "завтрак",
     "подарить конфеты": "конфеты",
+    "конфеты": "конфеты",
+    "конфетка": "конфеты",
+    "отн конфеты": "конфеты",
+    "подарить цветы": "цветы",
+    "цветы": "цветы",
+    "букет": "цветы",
+    "подарить букет": "цветы",
+    "розы": "цветы",
+    "отн цветы": "цветы",
     "сходить в кино": "кино",
+    "кино": "кино",
+    "в кино": "кино",
+    "фильм": "кино",
+    "посмотреть кино": "кино",
+    "посмотреть фильм": "кино",
+    "отн кино": "кино",
     "по душам": "душа",
+    "душа": "душа",
     "поговорить по душам": "душа",
+    "отн душа": "душа",
+    "отн по душам": "душа",
     "пригласить в клуб": "клуб",
+    "клуб": "клуб",
+    "в клуб": "клуб",
     "тусовка": "клуб",
+    "пати": "клуб",
+    "отн клуб": "клуб",
     "устроить сюрприз": "сюрприз",
+    "сюрприз": "сюрприз",
+    "романтический сюрприз": "сюрприз",
+    "отн сюрприз": "сюрприз",
     "большой подарок": "подарок",
     "сделать подарок": "подарок",
+    "подарок": "подарок",
+    "сделать большой подарок": "подарок",
+    "вручить подарок": "подарок",
+    "отн подарок": "подарок",
 }
 
 # --- Каталог совместного имущества ---
@@ -80,7 +144,7 @@ PROPERTY_CATALOG = {
     "villa": ("Вилла у океана", "🏰", 150000, 4),
     "sportcar": ("Спорткар Porsche", "🏎", 300000, 5),
     "yacht": ("Белоснежная яхта", "🛥", 600000, 6),
-    "factory": ("Завод ирисок", "🏭", 1500000, 7),
+    "factory": ("Завод сладостей", "🏭", 1500000, 7),
     "island": ("Тропический остров", "🏝", 5000000, 8),
 }
 
@@ -464,14 +528,173 @@ async def cmd_divorce(message: Message, bot: Bot, args: str = "", **kw):
         f"Совместное имущество и достижения этой пары аннулированы.{rem_text}")
 
 
+ACTION_DETAILS = {
+    "комплимент": {
+        "phrases": [
+            "«Твоя улыбка способна осветить даже самый пасмурный день! ☀️»",
+            "«Ты невероятно добрый, отзывчивый и светлый человек! ✨»",
+            "«С тобой любое общение становится тёплым и уютным! ☕️»",
+            "«Твоё чувство юмора — просто высший пилотаж! 😄»",
+            "«Ты потрясающе выглядишь и заряжаешь всех уверенностью! 💫»",
+            "«Рядом с тобой всегда легко, спокойно и радостно! 🌸»",
+            "«Твоей мудрости, терпению и рассудительности можно только позавидовать! 🧠»",
+            "«Ты делаешь этот чат и весь мир намного прекраснее! 🌺»",
+            "«Твои глаза полны искренности, глубины и тепла! 👁️✨»",
+            "«У тебя потрясающий вкус, грация и стиль! 👗👔»",
+            "«Ты самый дорогой и замечательный человек на свете! 💖»",
+            "«Твоя энергия и позитив вдохновляют меня каждый день! ⚡️»",
+            "«Ты умеешь выслушать и поддержать в самый нужный момент! 💕»",
+            "«Ты настоящий лучик солнца и счастье в моей жизни! 🌟»",
+        ]
+    },
+    "анекдот": {
+        "phrases": [
+            "— Ты веришь в любовь с первого взгляда или мне пройти мимо ещё раз? 😉",
+            "— Доктор, я кажется безнадёжно влюблён!\n— Это неизлечимо, рецепт: обниматься трижды в день! ❤️",
+            "— Знаешь, почему звёзды падают? Чтобы уступить место твоей красоте! ✨",
+            "— Что общего между тобой и чашкой горячего шоколада? Вы оба согреваете моё сердечко! ☕️",
+            "— Дорогая, я подарю тебе луну с неба!\n— Лучше пиццу с сырными бортиками! 🍕",
+            "— С тобой даже в очереди стоять романтично! 🥰",
+            "— Если бы красота была преступлением, ты бы сидел(а) пожизненно! 🚨",
+            "— Ты случайно не Wi-Fi? Просто я чувствую мощную связь между нами! 📶",
+        ]
+    },
+    "еда": {
+        "phrases": [
+            "горячую хрустящую пиццу с тянущимся сыром 🍕",
+            "роскошный сет свежих роллов «Филадельфия» 🍣",
+            "ароматные свежеиспеченные круассаны и горячий капучино 🥐☕️",
+            "спелую клубнику в нежном бельгийском шоколаде 🍓🍫",
+            "домашнюю пасту карбонара с пармезаном 🍝",
+            "нежнейшие чизкейки с лесными ягодами 🍰",
+            "сочные фирменные бургеры с золотистой картошечкой фри 🍔🍟",
+        ]
+    },
+    "мем": {
+        "phrases": [
+            "самый угарный мем с котиками про искреннюю любовь 🐱❤️",
+            "отборный жизненный рофл из ленты, от которого сводит скулы от смеха 😂",
+            "милый мемчик с капибарами в тёплой ванне 🛁🫧",
+            "постироничный шедевр, понятный только им двоим 🎭",
+            "мем про то, как сильно они скучают друг по другу 🥺",
+            "смешную гифку с танцующими пингвинами 🐧🎶",
+        ]
+    },
+    "поговорить": {
+        "phrases": [
+            "мило обсуждает планы на будущее и совместные мечты 💭",
+            "делится самыми сокровенными мыслями и тайнами 🤫",
+            "вспоминает самые смешные и яркие моменты знакомства ✨",
+            "делится впечатлениями о прошедшем дне и дарит поддержку 🌟",
+            "строит грандиозные планы на совместное путешествие ✈️",
+        ]
+    },
+    "обнимать": {
+        "phrases": [
+            "крепко и нежно обнимает, согревая своим теплом 🤗",
+            "укутывает в мягкие объятия под тёплым пледом 🧸",
+            "прижимает к сердцу и шепчет самые нежные слова 💕",
+            "дарит самые тёплые и искренние обнимашки на свете 🫂",
+        ]
+    },
+    "шоколад": {
+        "phrases": [
+            "плитку элитного молочного шоколада 🍫",
+            "коробочку нежнейших трюфелей ручной работы 🍬",
+            "плитку тёмного шоколада с цельным фундуком 🌰",
+            "белый шоколад с кусочками сублимированной малины 🍓",
+            "горячий шоколад с пышным маршмеллоу ☕️",
+        ]
+    },
+    "погулять": {
+        "phrases": [
+            "под звёздным небом по тихой ночной набережной 🌌",
+            "по живописному осеннему парку, шурша золотыми листьями 🍂",
+            "по уютным мощёным улочкам старого города с горячим кофе ☕️",
+            "на крышу высотки с панорамным видом на огни ночного города 🌃",
+            "по цветущей аллее сакуры в лучах заходящего солнца 🌸🌇",
+        ]
+    },
+    "завтрак": {
+        "phrases": [
+            "пышные панкейки со свежей черникой и кленовым сиропом в постель 🥞🍓",
+            "нежный омлет с хрустящими тостами, авокадо и свежим соком 🥑🍳",
+            "ароматный свежесваренный кофе и теплые круассаны с шоколадом 🥐☕️",
+            "хрустящие венские вафли с шариком сливочного мороженого 🧇🍨",
+        ]
+    },
+    "конфеты": {
+        "phrases": [
+            "коробку изысканных конфет Ferrero Rocher и Raffaello 🍬✨",
+            "набор авторских пралине с начинкой из лесных орехов 🌰",
+            "огромный бокс сладких мармеладок всех вкусов 🍭",
+            "французские макаруны всех цветов радуги 🍡",
+        ]
+    },
+    "цветы": {
+        "phrases": [
+            "роскошный пышный букет из 101 алой розы 🌹",
+            "нежнейшую композицию из свежих розовых пионов 🌸",
+            "огромную охапку весенних ярких тюльпанов 🌷",
+            "волшебную корзину белых гортензий и эустом 💐",
+        ]
+    },
+    "кино": {
+        "phrases": [
+            "на романтическую комедию на самых уютных задних рядах 🎬🍿",
+            "на захватывающий блокбастер в IMAX с огромным ведром попкорна 🥤",
+            "на трогательную драму под открытым небом в автокинотеатре 🚗🎥",
+            "на уютный ночной киномарафон любимых фильмов 🍿✨",
+        ]
+    },
+    "душа": {
+        "phrases": [
+            "до самого рассвета обсуждает тайны вселенной и сокровенные чувства под звёздами 🌌💫",
+            "делится самыми глубокими переживаниями в атмосфере абсолютного доверия 🕯💖",
+            "раскрывает душу, чувствуя невероятное душевное единение и тепло 🌙✨",
+        ]
+    },
+    "клуб": {
+        "phrases": [
+            "зажигает в VIP-ложе лучшего клуба города под любимые треки 🎶💃",
+            "танцует до самого утра под неоновыми огнями и мощный бит 🕺🍸",
+            "устраивает сумасшедшую вечеринку, где они — главные звёзды танцпола 🌟🔥",
+        ]
+    },
+    "сюрприз": {
+        "phrases": [
+            "невероятный полет на воздушном шаре на рассвете 🎈🌅",
+            "спонтанный уикенд в шикарном отеле с видом на горы 🏔🍾",
+            "праздничный салют прямо под окнами любимого человека 🎆✨",
+            "романтический ужин при свечах на приватной яхте 🕯⛵️",
+        ]
+    },
+    "подарок": {
+        "phrases": [
+            "роскошную коробочку с эксклюзивным ювелирным украшением с бриллиантом 💎✨",
+            "ключи от новенького спорткара, перевязанного огромным красным бантом 🏎🎀",
+            "заветную путёвку на тропические острова в пятизвездочный отель 🏝✈️",
+            "исполнение самой заветной мечты, от которой на глазах наворачиваются слёзы счастья 🎁🥹",
+        ]
+    }
+}
+
+
 # ================== ПРОКАЧКА ОТНОШЕНИЙ ==================
 
 async def process_rel_action(message: Message, bot: Bot, action_key: str):
     me_id = message.from_user.id
-    rel = await db.get_relationship(me_id)
-    if not rel:
+    rels = await db.get_user_relationships(me_id)
+    if not rels:
         return await message.reply(
             "❌ <b>У вас нет отношений.</b>\nВступите в отношения командой: <code>отн @юзер</code>")
+
+    # Выбираем активную пару
+    cur_idx = await db.get_active_rel_idx(me_id)
+    if 1 <= cur_idx <= len(rels):
+        rel = rels[cur_idx - 1]
+    else:
+        rel = rels[0]
 
     other_id = get_other_id(rel, me_id)
     partner = await db.get_user(other_id)
@@ -508,9 +731,9 @@ async def process_rel_action(message: Message, bot: Bot, action_key: str):
     user = await db.get_user(me_id)
     if user["balance"] < cost:
         return await message.reply(
-            f"🍬 Не хватает ирисок для действия «{name}»!\n"
-            f"Требуется: <b>{cost} 🪙</b>, у вас: <b>{user['balance']} 🪙</b>.\n"
-            f"Заработайте ириски командой <code>работа</code>!")
+            f"🌑 Не хватает монет для действия «{name}»!\n"
+            f"Требуется: <b>{cost} 🌑</b>, у вас: <b>{user['balance']} 🌑</b>.\n"
+            f"Заработайте монеты командой <code>работа</code>!")
 
     # Списываем баланс и ставим кулдаун
     await db.add_balance(me_id, -cost, f"rel_{action_key}")
@@ -531,10 +754,34 @@ async def process_rel_action(message: Message, bot: Bot, action_key: str):
     earned_xp = xp + bonus_xp
     new_xp, new_lvl, lvl_up = await db.add_rel_xp(rel["id"], earned_xp)
 
+    details = ACTION_DETAILS.get(action_key, {})
+    phrases = details.get("phrases", [])
+    custom_desc = random.choice(phrases) if phrases else ""
+
+    if action_key == "анекдот":
+        main_action_line = f"{emoji} {mention(message.from_user)} рассказывает смешной анекдот для {mention_id(other_id, pname)}:\n\n{custom_desc}"
+    elif action_key == "комплимент":
+        main_action_line = f"{emoji} {mention(message.from_user)} делает нежный комплимент {mention_id(other_id, pname)}:\n\n{custom_desc}"
+    elif custom_desc:
+        if action_key in ("еда", "шоколад", "конфеты", "цветы", "подарок"):
+            main_action_line = f"{emoji} {mention(message.from_user)} дарит {custom_desc} для {mention_id(other_id, pname)}!"
+        elif action_key == "погулять":
+            main_action_line = f"{emoji} {mention(message.from_user)} идёт на прогулку {custom_desc} с {mention_id(other_id, pname)}!"
+        elif action_key == "завтрак":
+            main_action_line = f"{emoji} {mention(message.from_user)} готовит {custom_desc} для {mention_id(other_id, pname)}!"
+        elif action_key == "кино":
+            main_action_line = f"{emoji} {mention(message.from_user)} идёт {custom_desc} с {mention_id(other_id, pname)}!"
+        elif action_key == "мем":
+            main_action_line = f"{emoji} {mention(message.from_user)} присылает {custom_desc} для {mention_id(other_id, pname)}!"
+        else:
+            main_action_line = f"{emoji} {mention(message.from_user)} {custom_desc} с {mention_id(other_id, pname)}!"
+    else:
+        main_action_line = f"{emoji} {mention(message.from_user)} {verb} {mention_id(other_id, pname)}!"
+
     reply_text = (
-        f"{emoji} {mention(message.from_user)} {verb} {mention_id(other_id, pname)}!\n\n"
+        f"{main_action_line}\n\n"
         f"💖 Получено: <b>+{earned_xp} любви</b>{vip_badge}\n"
-        f"🍬 Потрачено: <b>{cost} 🪙</b>\n"
+        f"🌑 Потрачено: <b>{cost} 🌑</b>\n"
         f"✨ Всего любви: <b>{new_xp}</b> (Уровень {new_lvl})"
     )
 
@@ -547,28 +794,13 @@ async def process_rel_action(message: Message, bot: Bot, action_key: str):
     await message.reply(reply_text)
 
 
-COMPLIMENTS = [
-    "Твоя улыбка способна осветить даже самый пасмурный день! ☀️",
-    "Ты невероятно добрый, отзывчивый и светлый человек! ✨",
-    "С тобой любое общение становится тёплым и уютным! ☕️",
-    "Твоё чувство юмора — просто высший пилотаж! 😄",
-    "Ты потрясающе выглядишь и заряжаешь всех уверенностью! 💫",
-    "Рядом с тобой всегда легко, спокойно и радостно! 🌸",
-    "Твоей мудрости, терпению и рассудительности можно только позавидовать! 🧠",
-    "Ты делаешь этот чат и весь мир намного прекраснее! 🌺",
-    "Твои глаза полны искренности, глубины и тепла! 👁️✨",
-    "У тебя потрясающий вкус, грация и стиль! 👗👔",
-    "Ты самый надёжный и замечательный друг на свете! 🤝",
-    "Твоя энергия и позитив вдохновляют всех вокруг! ⚡️",
-    "Ты умеешь выслушать и поддержать в самый нужный момент! 💖",
-    "Ты настоящий лучик солнца и гордость нашей беседы! 🌟",
-    "Ты заслуживаешь море радости, счастья и исполнения всех желаний! 🎁",
-]
+COMPLIMENTS = ACTION_DETAILS["комплимент"]["phrases"]
+
 
 # Регистрация команд действий
-@router.message(Cmd("сделать комплимент", "комплимент", "похвалить", "отн комплимент",
+@router.message(Cmd("сделать комплимент", "комплимент", "похвалить", "отн комплимент", "сделать комплименты",
                     section=S_REL, usage="сделать комплимент",
-                    desc="Сделать комплимент второй половинке или всем партнерам (+5 любви)"))
+                    desc="Сделать комплимент второй половинке (+5 любви)"))
 async def cmd_act_compliment(message: Message, bot: Bot, args: str = "", **kw):
     me_id = message.from_user.id
     rels = await db.get_user_relationships(me_id)
@@ -582,7 +814,7 @@ async def cmd_act_compliment(message: Message, bot: Bot, args: str = "", **kw):
             phrase = random.choice(COMPLIMENTS)
             return await message.reply(
                 f"💬 {mention(message.from_user)} делает комплимент {mention_id(uid, name)}:\n\n"
-                f"✨ «<i>{phrase}</i>» ✨")
+                f"✨ {phrase} ✨")
 
     # Если отношений вообще нет
     if not rels:
@@ -593,156 +825,95 @@ async def cmd_act_compliment(message: Message, bot: Bot, args: str = "", **kw):
             "💡 <i>Вы также можете сделать обычный комплимент любому участнику: <code>комплимент @юзер</code></i>",
             disable_web_page_preview=True)
 
-    # VIP расчет
-    vip_lvl, _, vip_active = await db.get_vip_info(me_id)
-    base_xp = 5
-    bonus_xp = 0
-    vip_badge = ""
-    if vip_active:
-        if vip_lvl >= 2:
-            bonus_xp = int(base_xp * 0.50)
-            vip_badge = " <i>(+50% VIP+ бонус)</i>"
-        elif vip_lvl >= 1:
-            bonus_xp = int(base_xp * 0.25)
-            vip_badge = " <i>(+25% VIP бонус)</i>"
-    earned_xp = base_xp + bonus_xp
-    phrase = random.choice(COMPLIMENTS)
-
-    # Если 1 отношение
-    if len(rels) == 1:
-        rel = rels[0]
-        other_id = get_other_id(rel, me_id)
-        partner = await db.get_user(other_id)
-        pname = partner["first_name"] or str(other_id)
-
-        if rel["offended_by"] == other_id:
-            return await message.reply(
-                f"💔 <b>Ваш партнер обижен на вас!</b>\n\n"
-                f"{mention_id(other_id, pname)} обижается, поэтому романтические действия заблокированы.\n"
-                f"Вам нужно задобрить вторую половинку: <code>отн задобрить</code>!")
-
-        cd = 600
-        left = await db.get_rel_cooldown_left(rel["id"], me_id, "комплимент", cd)
-        if left > 0:
-            return await message.reply(
-                f"⏳ 💬 <b>Сделать комплимент</b> уже было недавно.\n"
-                f"Подождите ещё <b>{human_period(left)}</b> перед повтором.")
-
-        cost = 3
-        user = await db.get_user(me_id)
-        if user["balance"] < cost:
-            return await message.reply(
-                f"🍬 Не хватает ирисок для комплимента!\n"
-                f"Требуется: <b>{cost} 🪙</b>, у вас: <b>{user['balance']} 🪙</b>.\n"
-                f"Заработайте ириски командой <code>работа</code>!")
-
-        await db.add_balance(me_id, -cost, "rel_compliment")
-        await db.set_rel_cooldown(rel["id"], me_id, "комплимент")
-        new_xp, new_lvl, lvl_up = await db.add_rel_xp(rel["id"], earned_xp)
-
-        reply_text = (
-            f"💬 {mention(message.from_user)} сделал(а) комплимент своей 2 половинке {mention_id(other_id, pname)}:\n\n"
-            f"✨ «<i>{phrase}</i>» ✨\n\n"
-            f"💖 Получено: <b>+{earned_xp} любви</b>{vip_badge}\n"
-            f"🍬 Потрачено: <b>{cost} 🪙</b>\n"
-            f"✨ Всего любви: <b>{new_xp}</b> (Уровень {new_lvl})"
-        )
-        if lvl_up:
-            reply_text += (
-                f"\n\n🎊 <b>УРОВЕНЬ ОТНОШЕНИЙ ПОВЫШЕН ДО {new_lvl}!</b> 🎊\n"
-                f"Вам открылись новые действия в <code>отн меню</code>! 💖"
-            )
-        return await message.reply(reply_text)
-
-    # Если отношений несколько (>1)
-    cost_per_rel = 3
-    total_cost = cost_per_rel * len(rels)
-    user = await db.get_user(me_id)
-    if user["balance"] < total_cost:
-        return await message.reply(
-            f"🍬 Не хватает ирисок для комплимента всем партнерам ({len(rels)} союзов)!\n"
-            f"Требуется: <b>{total_cost} 🪙</b>, у вас: <b>{user['balance']} 🪙</b>.")
-
-    partner_mentions = []
-    lvl_ups = []
-    applied_count = 0
-
-    for r in rels:
-        other_id = get_other_id(r, me_id)
-        p = await db.get_user(other_id)
-        pname = p["first_name"] or str(other_id)
-        partner_mentions.append(mention_id(other_id, pname))
-
-        await db.set_rel_cooldown(r["id"], me_id, "комплимент")
-        _, new_lvl, lvl_up = await db.add_rel_xp(r["id"], earned_xp)
-        if lvl_up:
-            lvl_ups.append(f"• с {mention_id(other_id, pname)}: <b>Уровень {new_lvl}</b> 🏆")
-        applied_count += 1
-
-    await db.add_balance(me_id, -total_cost, "rel_compliment_multi")
-    partners_str = ", ".join(partner_mentions)
-
-    reply_text = (
-        f"💬 {mention(message.from_user)} сделал(а) комплимент своим партнерам {partners_str}:\n\n"
-        f"✨ «<i>{phrase}</i>» ✨\n\n"
-        f"💖 Получено: <b>+{earned_xp} любви</b> во все союзы ({applied_count}){vip_badge}\n"
-        f"🍬 Потрачено: <b>{total_cost} 🪙</b>"
-    )
-    if lvl_ups:
-        reply_text += "\n\n🎊 <b>ПОВЫШЕНИЕ УРОВНЯ В СОЮЗАХ:</b>\n" + "\n".join(lvl_ups)
-
-    return await message.reply(reply_text)
+    await process_rel_action(message, bot, "комплимент")
 
 
-@router.message(Cmd("анекдот", "отн анекдот", section=S_REL, usage="анекдот", desc="Рассказать анекдот (+10 любви)"))
+@router.message(Cmd("рассказать анекдот", "анекдот", "шутка", "пошутить", "травить анекдоты", "отн анекдот", "смешной анекдот",
+                    section=S_REL, usage="рассказать анекдот", desc="Рассказать анекдот (+10 любви)"))
 async def cmd_act_joke(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "анекдот")
 
-@router.message(Cmd("еда", "отн еда", "поделиться едой", section=S_REL, usage="еда", desc="Поделиться едой (+20 любви)"))
+
+@router.message(Cmd("поделиться едой", "еда", "покормить", "угостить", "вкусняшка", "отн еда", "поделиться вкусняшкой",
+                    section=S_REL, usage="поделиться едой", desc="Поделиться едой (+20 любви)"))
 async def cmd_act_food(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "еда")
 
-@router.message(Cmd("мем", "отн мем", "кинуть мем", section=S_REL, usage="мем", desc="Кинуть мем (+20 любви)"))
+
+@router.message(Cmd("кинуть мем", "мем", "мемы", "мемчик", "скинуть мем", "отправить мем", "отн мем",
+                    section=S_REL, usage="кинуть мем", desc="Кинуть мем (+20 любви)"))
 async def cmd_act_meme(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "мем")
 
-@router.message(Cmd("поговорить", "отн поговорить", section=S_REL, usage="поговорить", desc="Поговорить (+30 любви)"))
+
+@router.message(Cmd("поговорить", "мило поговорить", "беседа", "поболтать", "отн поговорить",
+                    section=S_REL, usage="поговорить", desc="Поговорить (+30 любви)"))
 async def cmd_act_talk(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "поговорить")
 
-@router.message(Cmd("шоколад", "отн шоколад", "подарить шоколадку", section=S_REL, usage="шоколад", desc="Подарить шоколадку (+50 любви)"))
+
+@router.message(Cmd("обнимать", "обнять", "обнимашки", "крепко обнять", "обнял", "обняла", "отн обнять", "отн обнимашки",
+                    section=S_REL, usage="обнять", desc="Крепко обнять (+30 любви)"))
+async def cmd_act_hug(message: Message, bot: Bot, **kw):
+    await process_rel_action(message, bot, "обнимать")
+
+
+@router.message(Cmd("подарить шоколадку", "шоколадка", "шоколад", "подарить шоколад", "вкусная шоколадка", "отн шоколад", "отн шоколадка",
+                    section=S_REL, usage="подарить шоколадку", desc="Подарить шоколадку (+50 любви)"))
 async def cmd_act_choco(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "шоколад")
 
-@router.message(Cmd("погулять", "отн погулять", "прогулка", section=S_REL, usage="погулять", desc="Пригласить погулять (+70 любви)"))
+
+@router.message(Cmd("пригласить погулять", "погулять", "гулять", "прогулка", "пойдем гулять", "пойти гулять", "отн погулять", "отн гулять",
+                    section=S_REL, usage="пригласить погулять", desc="Пригласить погулять (+70 любви)"))
 async def cmd_act_walk(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "погулять")
 
-@router.message(Cmd("завтрак", "отн завтрак", "сделать завтрак", section=S_REL, usage="завтрак", desc="Сделать завтрак (+100 любви)"))
+
+@router.message(Cmd("сделать завтрак", "завтрак", "приготовить завтрак", "завтрак в постель", "отн завтрак",
+                    section=S_REL, usage="сделать завтрак", desc="Сделать завтрак (+100 любви)"))
 async def cmd_act_breakfast(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "завтрак")
 
-@router.message(Cmd("конфеты", "отн конфеты", "подарить конфеты", section=S_REL, usage="конфеты", desc="Подарить конфеты (+100 любви)"))
+
+@router.message(Cmd("подарить конфеты", "конфеты", "конфетка", "коробка конфет", "сладости", "отн конфеты",
+                    section=S_REL, usage="подарить конфеты", desc="Подарить конфеты (+100 любви)"))
 async def cmd_act_sweets(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "конфеты")
 
-@router.message(Cmd("кино", "отн кино", "сходить в кино", section=S_REL, usage="кино", desc="Сходить в кино (+200 любви)"))
+
+@router.message(Cmd("подарить цветы", "цветы", "букет", "подарить букет", "розы", "отн цветы", "отн букет",
+                    section=S_REL, usage="подарить цветы", desc="Подарить цветы (+150 любви)"))
+async def cmd_act_flowers(message: Message, bot: Bot, **kw):
+    await process_rel_action(message, bot, "цветы")
+
+
+@router.message(Cmd("сходить в кино", "кино", "фильм", "в кино", "посмотреть кино", "посмотреть фильм", "отн кино",
+                    section=S_REL, usage="сходить в кино", desc="Сходить в кино (+200 любви)"))
 async def cmd_act_cinema(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "кино")
 
-@router.message(Cmd("душа", "отн душа", "по душам", section=S_REL, usage="душа", desc="Поговорить по душам (+300 любви)"))
+
+@router.message(Cmd("поговорить по душам", "по душам", "душа", "душевный разговор", "отн душа", "отн по душам",
+                    section=S_REL, usage="поговорить по душам", desc="Поговорить по душам (+300 любви)"))
 async def cmd_act_soul(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "душа")
 
-@router.message(Cmd("клуб", "отн клуб", "пригласить в клуб", section=S_REL, usage="клуб", desc="Пригласить в клуб (+500 любви)"))
+
+@router.message(Cmd("пригласить в клуб", "клуб", "в клуб", "тусовка", "пати", "дискотека", "отн клуб",
+                    section=S_REL, usage="пригласить в клуб", desc="Пригласить в клуб (+500 любви)"))
 async def cmd_act_club(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "клуб")
 
-@router.message(Cmd("сюрприз", "отн сюрприз", "устроить сюрприз", section=S_REL, usage="сюрприз", desc="Устроить сюрприз (+750 любви)"))
+
+@router.message(Cmd("устроить сюрприз", "сюрприз", "романтический сюрприз", "отн сюрприз",
+                    section=S_REL, usage="устроить сюрприз", desc="Устроить сюрприз (+750 любви)"))
 async def cmd_act_surprise(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "сюрприз")
 
-@router.message(Cmd("подарок", "отн подарок", "большой подарок", section=S_REL, usage="подарок", desc="Сделать большой подарок (+3000 любви)"))
+
+@router.message(Cmd("сделать большой подарок", "сделать подарок", "большой подарок", "подарок", "вручить подарок", "отн подарок",
+                    section=S_REL, usage="сделать подарок", desc="Сделать большой подарок (+3000 любви)"))
 async def cmd_act_gift(message: Message, bot: Bot, **kw):
     await process_rel_action(message, bot, "подарок")
 
@@ -869,7 +1040,7 @@ async def cmd_buy_property(message: Message, bot: Bot, args: str = "", **kw):
             break
 
     if not found_key:
-        lines = [f"• <code>отн купить {k}</code> — {e} {n} (<b>{p:,} 🪙</b>, Ур. {l})"
+        lines = [f"• <code>отн купить {k}</code> — {e} {n} (<b>{p:,} 🌑</b>, Ур. {l})"
                  for k, (n, e, p, l) in PROPERTY_CATALOG.items()]
         return await message.reply(
             "🛍 <b>Каталог совместного имущества:</b>\n\n" + "\n".join(lines))
@@ -884,7 +1055,7 @@ async def cmd_buy_property(message: Message, bot: Bot, args: str = "", **kw):
 
     user = await db.get_user(me_id)
     if user["balance"] < price:
-        return await message.reply(f"🍬 Не хватает ирисок: нужно <b>{price:,} 🪙</b>, у вас <b>{user['balance']:,} 🪙</b>.")
+        return await message.reply(f"🌑 Не хватает монет: нужно <b>{price:,} 🌑</b>, у вас <b>{user['balance']:,} 🌑</b>.")
 
     await db.add_balance(me_id, -price, f"buy_{found_key}")
     await db.add_rel_property(rel["id"], found_key, f"{emoji} {name}", price)
@@ -897,7 +1068,7 @@ async def cmd_buy_property(message: Message, bot: Bot, args: str = "", **kw):
     await message.reply(
         f"🎉 <b>Поздравляем с покупкой!</b> 🎉\n\n"
         f"{mention(message.from_user)} приобрёл(а) {emoji} <b>{name}</b> в совместное владение "
-        f"с {mention_id(other_id, pname)} за <b>{price:,} 🪙</b>!\n"
+        f"с {mention_id(other_id, pname)} за <b>{price:,} 🌑</b>!\n"
         f"💖 Получено <b>+{price // 20} любви</b> за крупное приобретение!")
 
 
@@ -971,7 +1142,7 @@ async def cb_rel_ui(call: CallbackQuery, bot: Bot):
             status = "✅" if rel["level"] >= lvl else f"🔒 (с {lvl} ур.)"
             left = await db.get_rel_cooldown_left(rel_id, call.from_user.id, k, cd)
             cd_s = f"⏳ {human_period(left)}" if left > 0 else "🟢 Готово"
-            lines.append(f"{status} {emoji} <b>{name}</b> (+{xp} любви)\n   🍬 {cost} 🪙 · {human_period(cd)} · {cd_s}")
+            lines.append(f"{status} {emoji} <b>{name}</b> (+{xp} любви)\n   🌑 {cost} 🌑 · {human_period(cd)} · {cd_s}")
 
         await call.message.edit_text("\n".join(lines), reply_markup=back_kb)
         return await call.answer()
@@ -986,7 +1157,7 @@ async def cb_rel_ui(call: CallbackQuery, bot: Bot):
             lines = ["🏠 <b>Совместное имущество пары:</b>\n"]
             for p in props:
                 d = time.strftime('%d.%m.%Y', time.localtime(p['bought_at']))
-                lines.append(f"• {p['item_name']} — куплено {d} за {p['price']:,} 🪙")
+                lines.append(f"• {p['item_name']} — куплено {d} за {p['price']:,} 🌑")
             text = "\n".join(lines)
         await call.message.edit_text(text, reply_markup=back_kb)
         return await call.answer()
@@ -1011,7 +1182,7 @@ async def cb_rel_ui(call: CallbackQuery, bot: Bot):
         lines = ["🛍 <b>Магазин имущества для пар</b>\n"]
         for k, (n, e, p, l) in PROPERTY_CATALOG.items():
             avail = "✅ Доступно" if rel["level"] >= l else f"🔒 С {l} ур."
-            lines.append(f"{e} <b>{n}</b> — <b>{p:,} 🪙</b> ({avail})\n   Купить: <code>отн купить {k}</code>")
+            lines.append(f"{e} <b>{n}</b> — <b>{p:,} 🌑</b> ({avail})\n   Купить: <code>отн купить {k}</code>")
         await call.message.edit_text("\n".join(lines), reply_markup=back_kb)
         return await call.answer()
 

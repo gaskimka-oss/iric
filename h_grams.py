@@ -173,11 +173,16 @@ async def _ensure_start(uid: int) -> None:
 
 
 async def get_gram_topic(chat_id: int) -> int:
-    v = await db.get_setting(chat_id, "gram_topic", "0")
+    from core_seed import MAIN_CHAT
+    default_val = "132681" if (chat_id == MAIN_CHAT or str(chat_id).endswith("3934033202")) else "0"
+    v = await db.get_setting(chat_id, "gram_topic", default_val)
     try:
-        return int(v)
+        val = int(v)
+        if val == 0 and (chat_id == MAIN_CHAT or str(chat_id).endswith("3934033202")):
+            return 132681
+        return val
     except ValueError:
-        return 0
+        return 132681 if (chat_id == MAIN_CHAT or str(chat_id).endswith("3934033202")) else 0
 
 
 def _tid(message: Message) -> int:
@@ -191,17 +196,21 @@ def _tlink(chat_id: int, tid: int) -> str:
 
 
 async def topic_ok(message: Message) -> bool:
-    """Проверяет тему для игр."""
+    """Проверяет тему для игр, казино, заработка, ограблений и монет."""
     if message.chat.type == "private":
         return True
     ft = await get_gram_topic(message.chat.id)
-    if not ft or _tid(message) == ft:
+    if not ft:
+        return True
+
+    tid = _tid(message)
+    if tid == ft:
         return True
 
     chat_id = message.chat.id
     text = (
-        f"❌ {mention(message.from_user)}, здесь нельзя играть!\n\n"
-        f"🎮 <b>Игры, монеты и бизнесы</b> — только в этой теме:\n"
+        f"❌ {mention(message.from_user)}, здесь нельзя играть и совершать операции с валютой!\n\n"
+        f"🎰 <b>Игры, казино, работа, ограбления и монеты</b> — только в этой теме:\n"
         f"{_tlink(chat_id, ft)}\n\n"
         f"<i>Сообщение исчезнет через минуту.</i>"
     )
@@ -329,7 +338,7 @@ async def cmd_daily(message: Message, **kw):
         f"Ваш баланс: <b>{c(bal)}</b>")
 
 
-@router.message(Cmd("топ", "топ монет", "топ игроков", "топ коинов", "топ грамм", "топ грами", "топ богатых", "топ баланс", section=S,
+@router.message(Cmd("топ", "топ монет", "топ игроков", "топ коинов", "топ грамм", "топ грами", "топ богатых", "топ баланс", "топ по ирискам", "топ ирисок", section=S,
                     usage="топ", desc="Богатейшие игроки"))
 async def cmd_top(message: Message, **kw):
     if not await topic_ok(message):
@@ -339,33 +348,61 @@ async def cmd_top(message: Message, **kw):
         "ORDER BY balance DESC LIMIT 10")
     if not rows:
         return await message.reply("Пока никто не играл.")
-    medals = ["🥇", "🥈", "🥉"] + ["▫️"] * 7
+    medals = ["🥇", "🥈", "🥉"] + ["🔹"] * 7
     await message.reply(f"🌑 <b>Топ игроков по балансу</b>\n\n" + "\n".join(
         f"{medals[i]} {mention_id(r['user_id'], r['first_name'])} — {c(r['balance'])}"
         for i, r in enumerate(rows)))
 
 
-@router.message(Cmd("передать", "перевод", "дать", "передать монеты", "дать монеты", "перевод монет", "передать коины", "дать коины", "give", section=S,
-                    usage="передать {ссылка} {сумма}", desc="Передать валюту 🌑"))
+@router.message(Cmd("восстановить топ", "сброс топа", "сбросить топ", "вернуть топ", "фикс топа", "исправить топ",
+                    "restore top", "reset top", rank=6, section=S,
+                    usage="восстановить топ", desc="Восстановить эталонный топ балансов и сбросить баганные триллионы"))
+async def cmd_restore_top(message: Message, bot: Bot, **kw):
+    from core_ranks import require
+    if not await require(message, bot, 6):
+        return
+    
+    await db.restore_top_balances()
+    rows = await db.fetchall(
+        "SELECT user_id, first_name, balance FROM users WHERE balance > 0 "
+        "ORDER BY balance DESC LIMIT 10")
+    
+    medals = ["🥇", "🥈", "🥉"] + ["🔹"] * 7
+    top_lines = "\n".join(
+        f"{medals[i]} {mention_id(r['user_id'], r['first_name'])} — {c(r['balance'])}"
+        for i, r in enumerate(rows))
+    
+    await message.reply(
+        f"🏆 <b>Эталонный топ балансов успешно восстановлен!</b>\n\n"
+        f"Все накрученные триллионы и баги сброшены.\n\n"
+        f"🌑 <b>Актуальный топ по балансу:</b>\n{top_lines}")
+
+
+@router.message(Cmd("п", "п.", "передать", "перевод", "дать", "передать монеты", "дать монеты", "перевод монет",
+                    "передать коины", "дать коины", "передать граммы", "дать граммы", "pay", "give", section=S,
+                    usage="п {ссылка} {сумма}", desc="Передать валюту 🌑"))
 async def cmd_give(message: Message, bot: Bot, args: str = "", **kw):
     if not await topic_ok(message):
         return
     uid, name, rest = await resolve_target(message, args, bot)
     if not uid:
-        return await message.reply("Укажите получателя: реплаем или @ником.")
+        return await message.reply("Укажите получателя: реплаем или @ником.\nПример: <code>п @user 5000</code> или <code>п 5000</code> ответом")
     if uid == message.from_user.id:
         return await message.reply("Себе передать нельзя 🙂")
     bal = await db.get_balance(message.from_user.id)
     amount = parse_amount(rest, bal, 1)
     if not amount or amount <= 0:
-        return await message.reply("Укажите сумму: <code>передать @user 5000</code>")
+        return await message.reply("Укажите сумму: <code>п @user 5000</code> или <code>п 5000</code> ответом")
     if amount > bal:
-        return await message.reply(f"Недостаточно средств. Баланс: <b>{c(bal)}</b>")
-    await db.add_balance(message.from_user.id, -amount, "give_out", str(uid))
+        return await message.reply(f"Недостаточно средств.\nВаш баланс: <b>{c(bal)}</b>")
+    
+    sender_bal = await db.add_balance(message.from_user.id, -amount, "give_out", str(uid))
     await db.add_balance(uid, amount, "give_in", str(message.from_user.id))
     await message.reply(
-        f"✅ {mention(message.from_user)} → {mention_id(uid, name)}\n"
-        f"Передано: <b>{c(amount)}</b>")
+        f"✅ {mention(message.from_user)} ➡️ {mention_id(uid, name)}\n"
+        f"Передано: <b>{c(amount)}</b>\n"
+        f"Остаток на балансе: <b>{c(sender_bal)}</b>")
+
 
 
 # ═══════════════ СИСТЕМА БИЗНЕСОВ И РЫНКА ═══════════════

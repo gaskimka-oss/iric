@@ -396,6 +396,15 @@ async def init() -> None:
         pass
     await _conn.commit()
 
+    # Авто-восстановление эталонного топа, если обнаружены испорченные балансы (> 5 000 000)
+    try:
+        async with _conn.execute("SELECT 1 FROM users WHERE balance > 5000000 LIMIT 1") as cur:
+            if await cur.fetchone():
+                await restore_top_balances()
+    except Exception:
+        pass
+
+
 
 async def _migrate() -> None:
     """Добавляет недостающие колонки в уже существующих базах."""
@@ -498,11 +507,17 @@ async def get_balance(user_id: int) -> int:
 
 async def add_balance(user_id: int, amount: int, action: str = "", meta: str = "") -> int:
     await get_user(user_id)
-    await execute("UPDATE users SET balance = MAX(0, balance + ?) WHERE user_id=?", (amount, user_id))
+    # Защита от NaN / бесконечности / переполнений
+    try:
+        amt = int(amount)
+    except Exception:
+        amt = 0
+    # Максимальная разумная граница баланса для защиты от переполнений (100 млрд)
+    await execute("UPDATE users SET balance = MIN(100000000000, MAX(0, balance + ?)) WHERE user_id=?", (amt, user_id))
     if action:
         await execute(
             "INSERT INTO log (user_id, action, amount, meta, ts) VALUES (?,?,?,?,?)",
-            (user_id, action, amount, meta, int(time.time())),
+            (user_id, action, amt, meta, int(time.time())),
         )
     row = await fetchone("SELECT balance FROM users WHERE user_id=?", (user_id,))
     return row["balance"] if row else 0
@@ -510,13 +525,80 @@ async def add_balance(user_id: int, amount: int, action: str = "", meta: str = "
 
 async def set_balance(user_id: int, amount: int) -> int:
     await get_user(user_id)
-    await execute("UPDATE users SET balance=? WHERE user_id=?", (max(0, amount), user_id))
-    return max(0, amount)
+    val = max(0, int(amount))
+    await execute("UPDATE users SET balance=? WHERE user_id=?", (val, user_id))
+    return val
+
+
+REFERENCE_TOP = [
+    {"patterns": ["гоуст", "ghost"], "target_name": "Гоуст 🇬🇧 🇧🇾 🤙", "balance": 194915},
+    {"patterns": ["malaya", "малая"], "target_name": "𝓓𝓜𝓪𝓵𝓪𝔂𝓪🍼", "balance": 168869},
+    {"patterns": ["дима", "dima"], "target_name": "Дима", "balance": 135199},
+    {"user_id": 8297844640, "patterns": ["kaktys6390", "кактус"], "target_name": "Kaktys6390", "balance": 131455},
+    {"patterns": ["простоник", "просто ник"], "target_name": "ПростоНик", "balance": 113997},
+    {"patterns": ["авокадик", "авокадо", "avocado"], "target_name": "🥑АВОКАДИК🥑", "balance": 101915},
+    {"patterns": ["forever_young", "foreveryoung", "forever young"], "target_name": "forever_young🔞 🥷", "balance": 41443},
+    {"patterns": ["тамик", "tamik"], "target_name": "Тамик00", "balance": 22130},
+    {"patterns": ["lizaveta", "лизавета", "лиза"], "target_name": "༒Lizaveta༒", "balance": 15451},
+    {"patterns": ["саша", "sasha"], "target_name": "Саша", "balance": 12418},
+]
+
+
+async def restore_top_balances() -> list[dict]:
+    """Восстанавливает эталонный топ игроков и сбрасывает все накрученные триллионы."""
+    all_users = await fetchall("SELECT user_id, username, first_name, balance FROM users")
+    matched_uids = set()
+    restored = []
+
+    for item in REFERENCE_TOP:
+        target_uid = item.get("user_id")
+        matched_user = None
+
+        if target_uid:
+            matched_user = next((u for u in all_users if u["user_id"] == target_uid), None)
+
+        if not matched_user:
+            for u in all_users:
+                if u["user_id"] in matched_uids:
+                    continue
+                uname = (u.get("username") or "").lower()
+                fname = (u.get("first_name") or "").lower()
+                for pat in item["patterns"]:
+                    if pat in uname or pat in fname:
+                        matched_user = u
+                        break
+                if matched_user:
+                    break
+
+        if matched_user:
+            uid = matched_user["user_id"]
+            matched_uids.add(uid)
+            bal = item["balance"]
+            await execute("UPDATE users SET balance=? WHERE user_id=?", (bal, uid))
+            restored.append({
+                "user_id": uid,
+                "first_name": matched_user.get("first_name") or item["target_name"],
+                "balance": bal
+            })
+
+    # Сбрасываем всех остальных пользователей с баганными балансами (> 200 000) до 5000
+    for u in all_users:
+        uid = u["user_id"]
+        if uid not in matched_uids:
+            cur_bal = int(u.get("balance") or 0)
+            if cur_bal > 200000:
+                await execute("UPDATE users SET balance=5000 WHERE user_id=?", (uid,))
+
+    # Очищаем баганные записи лога ограблений
+    await execute("DELETE FROM log WHERE action IN ('rob_fail', 'rob_win', 'robbed_by', 'rob_comp') AND ABS(amount) > 5000000")
+
+    return restored
 
 
 # --- Алиасы для полной совместимости со всеми модулями ---
 async def get_grams(user_id: int) -> int:
     return await get_balance(user_id)
+
 
 
 async def add_grams(user_id: int, amount: int, action: str = "", meta: str = "") -> int:
