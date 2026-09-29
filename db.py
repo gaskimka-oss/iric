@@ -536,15 +536,15 @@ async def set_balance(user_id: int, amount: int) -> int:
 
 
 REFERENCE_TOP = [
-    {"patterns": ["гоуст", "ghost"], "target_name": "Гоуст 🇬🇧 🇧🇾 🤙", "balance": 194915},
-    {"patterns": ["malaya", "малая"], "target_name": "𝓓𝓜𝓪𝓵𝓪𝔂𝓪🍼", "balance": 168869},
+    {"patterns": ["гоуст", "ghost", "богатый"], "target_name": "Гоуст 🇬🇧 🇧🇾 🤙", "balance": 194915},
+    {"patterns": ["malaya", "малая", "əmalaya", "dmalaya"], "target_name": "𝓓𝓜𝓪𝓵𝓪𝔂𝓪🍼", "balance": 168869},
     {"patterns": ["дима", "dima"], "target_name": "Дима", "balance": 135199},
     {"user_id": 8297844640, "patterns": ["kaktys6390", "кактус"], "target_name": "Kaktys6390", "balance": 131455},
-    {"patterns": ["простоник", "просто ник"], "target_name": "ПростоНик", "balance": 113997},
+    {"patterns": ["простоник", "просто ник", "просто_ник"], "target_name": "ПростоНик", "balance": 113997},
     {"patterns": ["авокадик", "авокадо", "avocado"], "target_name": "🥑АВОКАДИК🥑", "balance": 101915},
     {"patterns": ["forever_young", "foreveryoung", "forever young"], "target_name": "forever_young🔞 🥷", "balance": 41443},
     {"patterns": ["тамик", "tamik"], "target_name": "Тамик00", "balance": 22130},
-    {"patterns": ["lizaveta", "лизавета", "лиза"], "target_name": "༒Lizaveta༒", "balance": 15451},
+    {"user_id": 6592023977, "patterns": ["lizaveta", "лизавета", "лиза", "l_i_zavetka"], "target_name": "༒Lizaveta༒", "balance": 15451},
     {"patterns": ["саша", "sasha"], "target_name": "Саша", "balance": 12418},
 ]
 

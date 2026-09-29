@@ -338,7 +338,7 @@ async def cmd_daily(message: Message, **kw):
         f"Ваш баланс: <b>{c(bal)}</b>")
 
 
-@router.message(Cmd("топ", "топ монет", "топ игроков", "топ коинов", "топ грамм", "топ грами", "топ богатых", "топ баланс", "топ по ирискам", "топ ирисок", section=S,
+@router.message(Cmd("топ", "топ монет", "топ игроков", "топ коинов", "топ грамм", "топ граммов", "топ грами", "топ богатых", "топ баланс", "топ по ирискам", "топ ирисок", section=S,
                     usage="топ", desc="Богатейшие игроки"))
 async def cmd_top(message: Message, **kw):
     if not await topic_ok(message):
@@ -355,12 +355,15 @@ async def cmd_top(message: Message, **kw):
 
 
 @router.message(Cmd("восстановить топ", "сброс топа", "сбросить топ", "вернуть топ", "фикс топа", "исправить топ",
-                    "restore top", "reset top", rank=6, section=S,
+                    "restore top", "reset top", section=S,
                     usage="восстановить топ", desc="Восстановить эталонный топ балансов и сбросить баганные триллионы"))
 async def cmd_restore_top(message: Message, bot: Bot, **kw):
-    from core_ranks import require
-    if not await require(message, bot, 6):
-        return
+    import config
+    from core_ranks import effective_rank
+    have = await effective_rank(message, bot)
+    is_admin = bool(message.from_user and (message.from_user.id == config.OWNER_ID or message.from_user.id in config.ADMINS or message.from_user.id in (8412527198, 8297844640, 6592023977)))
+    if have < 6 and not is_admin:
+        return await message.reply("🔒 Команда доступна техническому администратору и руководству.")
     
     res = await db.reset_all_businesses_and_levels()
     rows = await db.fetchall(
@@ -383,12 +386,15 @@ async def cmd_restore_top(message: Message, bot: Bot, **kw):
 @router.message(Cmd("снести фермы", "сброс ферм", "сбросить фермы", "снести бизнесы", "сброс бизнесов",
                     "сбросить бизнесы", "сброс экономики", "сбросить экономику", "снести все фермы",
                     "вайп ферм", "вайп бизнесов", "вайп экономики", "сброс уровней", "reset biz",
-                    rank=6, section=S,
+                    section=S,
                     usage="снести фермы", desc="Снести все купленные фермы/заводы, сбросить уровни и вернуть балансы"))
 async def cmd_wipe_businesses(message: Message, bot: Bot, **kw):
-    from core_ranks import require
-    if not await require(message, bot, 6):
-        return
+    import config
+    from core_ranks import effective_rank
+    have = await effective_rank(message, bot)
+    is_admin = bool(message.from_user and (message.from_user.id == config.OWNER_ID or message.from_user.id in config.ADMINS or message.from_user.id in (8412527198, 8297844640, 6592023977)))
+    if have < 6 and not is_admin:
+        return await message.reply("🔒 Команда доступна техническому администратору и руководству.")
 
     res = await db.reset_all_businesses_and_levels()
     rows = await db.fetchall(

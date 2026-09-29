@@ -188,6 +188,26 @@ def _selfheal_config() -> None:
                                    "persistent": False}
 
 
+from aiogram.client.session.middlewares.base import BaseRequestMiddleware
+from aiogram.methods import TelegramMethod
+
+
+class AutoDeleteBotMessagesMiddleware(BaseRequestMiddleware):
+    """Автоматически удаляет любые сообщения, отправленные ботом в группах, через 5 минут (300 секунд)."""
+    async def __call__(
+        self,
+        make_request,
+        bot: Bot,
+        method: TelegramMethod,
+    ):
+        result = await make_request(bot, method)
+        if isinstance(result, Message):
+            if result.chat and result.chat.id < 0:
+                import utils
+                asyncio.create_task(utils.delayed_delete_message(bot, result.chat.id, result.message_id, 300))
+        return result
+
+
 async def main() -> None:
     _selfheal_config()
     config.validate()
@@ -199,6 +219,7 @@ async def main() -> None:
 
     bot = Bot(token=config.BOT_TOKEN,
               default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot.session.middleware(AutoDeleteBotMessagesMiddleware())
 
     # если база пустая (хостинг стёр диск) — тянем последнюю копию из Telegram
     try:

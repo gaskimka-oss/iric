@@ -127,6 +127,13 @@ async def access_middleware(handler, event, data: dict):
     """Применяет ДК и антифлуд до вызова хэндлера."""
     key = data.get("cmd_key")
     if key:
+        # Автоудаление команды пользователя через 5 минут в группах
+        bot = data.get("bot")
+        if bot and getattr(event, "chat", None) and event.chat.id < 0 and getattr(event, "message_id", None):
+            import asyncio
+            import utils
+            asyncio.create_task(utils.delayed_delete_message(bot, event.chat.id, event.message_id, 300))
+
         # антифлуд: защита от перегрузки в больших чатах
         import core_throttle as throttle
         uid = event.from_user.id if event.from_user else 0

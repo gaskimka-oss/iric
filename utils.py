@@ -93,3 +93,19 @@ def arg_text(message: Message) -> str:
 
 def args_list(message: Message) -> list[str]:
     return (message.text or "").split()[1:]
+
+
+AUTO_DELETE_DELAY = 300  # 5 минут
+
+
+async def delayed_delete_message(bot, chat_id: int, message_id: int, delay: int = AUTO_DELETE_DELAY) -> None:
+    """Удаляет сообщение через delay секунд (по умолчанию 5 минут) в группах."""
+    if not bot or not chat_id or not message_id or chat_id >= 0:
+        return
+    import asyncio
+    try:
+        await asyncio.sleep(delay)
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
