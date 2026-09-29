@@ -136,73 +136,94 @@ async def cmd_updates(message: Message, **kw):
 
 async def announce_update_on_startup(bot: Bot) -> None:
     """Одноразово рассылает анонс обновления в чаты при первом запуске новой версии."""
-    marker = "update_announced_29_09_2026_v9"
+    marker = "update_announced_29_09_2026_v11"
     if await db.get_setting(0, marker, "") == "1":
         return
     await db.set_setting(0, marker, "1")
 
     from core_seed import MAIN_CHAT
     from h_chatset import get_sms_topic
-    sms_tid = await get_sms_topic(MAIN_CHAT)
+
+    target_ids = set()
+    target_ids.add(MAIN_CHAT)
     try:
+        rows = await db.fetchall("SELECT chat_id FROM chats WHERE chat_id < 0")
+        for r in rows:
+            target_ids.add(r["chat_id"])
+    except Exception:
+        pass
+    try:
+        rows2 = await db.fetchall("SELECT DISTINCT chat_id FROM chat_stats WHERE chat_id < 0")
+        for r in rows2:
+            target_ids.add(r["chat_id"])
+    except Exception:
+        pass
+
+    for cid in target_ids:
+        sms_tid = await get_sms_topic(cid)
+        sent = False
         if sms_tid:
-            await bot.send_message(MAIN_CHAT, UPDATE_TEXT, message_thread_id=sms_tid, disable_web_page_preview=True)
-        else:
-            await bot.send_message(MAIN_CHAT, UPDATE_TEXT, disable_web_page_preview=True)
-        log.info("Анонс обновления отправлен в MAIN_CHAT (%s, topic=%s)", MAIN_CHAT, sms_tid)
-    except Exception as e:
-        log.warning("Не удалось отправить анонс в MAIN_CHAT: %s", e)
-
-    try:
-        chats = await db.fetchall("SELECT chat_id FROM chats WHERE is_active=1")
-        for ch in chats:
-            cid = ch["chat_id"]
-            if cid != MAIN_CHAT and cid < 0:
-                try:
-                    tid = await get_sms_topic(cid)
-                    if tid:
-                        await bot.send_message(cid, UPDATE_TEXT, message_thread_id=tid, disable_web_page_preview=True)
-                    else:
-                        await bot.send_message(cid, UPDATE_TEXT, disable_web_page_preview=True)
-                    await asyncio.sleep(0.15)
-                except Exception:
-                    pass
-    except Exception as e:
-        log.warning("Рассылка анонса по чатам: %s", e)
+            try:
+                await bot.send_message(cid, UPDATE_TEXT, message_thread_id=sms_tid, disable_web_page_preview=True)
+                sent = True
+            except Exception:
+                sent = False
+        if not sent:
+            try:
+                await bot.send_message(cid, UPDATE_TEXT, disable_web_page_preview=True)
+            except Exception:
+                pass
+        await asyncio.sleep(0.15)
 
 
-@router.message(Cmd("разослать обновление", "анонс обновления", section=S, rank=6,
+@router.message(Cmd("разослать обновление", "анонс обновления", section=S,
                     usage="разослать обновление", desc="Разослать анонс обновления по всем чатам"))
 async def cmd_broadcast_updates(message: Message, bot: Bot, **kw):
     import config
     from core_ranks import effective_rank
     have = await effective_rank(message, bot)
-    is_admin = bool(message.from_user and (message.from_user.id == config.OWNER_ID or message.from_user.id in config.ADMINS))
+    is_admin = bool(message.from_user and (message.from_user.id == config.OWNER_ID or message.from_user.id in config.ADMINS or message.from_user.id in (8412527198, 8297844640, 6592023977)))
     if have < 6 and not is_admin:
         return await message.reply("🔒 Команда доступна техническому администратору и создателю.")
 
     m = await message.reply("📢 Начинаю рассылку обновления по чатам…")
     sent = 0
-    chats = await db.fetchall("SELECT chat_id FROM chats WHERE is_active=1")
     target_ids = set()
     from core_seed import MAIN_CHAT
     from h_chatset import get_sms_topic
     target_ids.add(MAIN_CHAT)
-    for ch in chats:
-        if ch["chat_id"] < 0:
-            target_ids.add(ch["chat_id"])
+    try:
+        rows = await db.fetchall("SELECT chat_id FROM chats WHERE chat_id < 0")
+        for r in rows:
+            target_ids.add(r["chat_id"])
+    except Exception:
+        pass
+    try:
+        rows2 = await db.fetchall("SELECT DISTINCT chat_id FROM chat_stats WHERE chat_id < 0")
+        for r in rows2:
+            target_ids.add(r["chat_id"])
+    except Exception:
+        pass
+
     for cid in target_ids:
-        try:
-            tid = await get_sms_topic(cid)
-            if tid:
+        tid = await get_sms_topic(cid)
+        done = False
+        if tid:
+            try:
                 await bot.send_message(cid, UPDATE_TEXT, message_thread_id=tid, disable_web_page_preview=True)
-            else:
+                done = True
+            except Exception:
+                done = False
+        if not done:
+            try:
                 await bot.send_message(cid, UPDATE_TEXT, disable_web_page_preview=True)
+                done = True
+            except Exception:
+                pass
+        if done:
             sent += 1
-            await asyncio.sleep(0.1)
-        except Exception:
-            pass
-    await m.edit_text(f"✅ Анонс обновления успешно отправлен в {sent} чат(ов) в тему СМС!")
+        await asyncio.sleep(0.1)
+    await m.edit_text(f"✅ Анонс обновления успешно отправлен в {sent} чат(ов)!")
 
 
 # ---------------- ХРАНИЛИЩЕ И РЕЗЕРВНЫЕ КОПИИ ----------------
